@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schedule to Form 1</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  body { font-family: "Times New Roman", "PMingLiU", "PMingLiu", serif; margin: 24px; color: #222; max-width: 980px; }
+  h1 { font-size: 22px; text-align: center; }
+  h2 { font-size: 16px; margin-top: 28px; }
+  #drop { border: 2px dashed #1F4E79; border-radius: 10px; padding: 28px; text-align: center; color: #1F4E79; background: #f4f8fb; cursor: pointer; margin-bottom: 16px; }
+  #drop.over { background: #e3eef8; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; font-size: 13px; }
+  th, td { border: 1px solid #999; padding: 4px 6px; }
+  th { background: #1F4E79; color: #fff; }
+  .sci { font-style: italic; }
+  .note { color: #555; font-size: 13px; font-family: Arial, sans-serif; }
+  .opts { font-family: Arial, sans-serif; margin: 8px 0 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+  .opts label { font-size: 14px; }
+  .opts input[type="text"] { font-family: inherit; font-size: 14px; padding: 4px 8px; min-width: 280px; }
+  .opts button { font-family: inherit; font-size: 14px; padding: 6px 12px; cursor: pointer; }
+  #s4text { width: 100%; height: 220px; font-family: inherit; font-size: 14px; padding: 10px; user-select: text; cursor: text; box-sizing: border-box; }
+  @media print { #drop, .opts, .note, .noprint { display: none; } }
+</style>
+</head>
+<body>
+<div id="drop">把 Tree Assessment Schedule（.xlsx / .xls）拖到這裡，或點擊選擇檔案</div>
+<input type="file" id="file" accept=".xlsx,.xls" hidden>
+<div class="opts">
+  <label>工程名稱 <input type="text" id="project" placeholder="例如：Queen Mary Hospital（可留空）"></label>
+  <label><input type="radio" name="dead" value="Unidentified" checked> Dead tree → Unidentified</label>
+  <label><input type="radio" name="dead" value="Dead tree"> Dead tree → Dead tree</label>
+  <label><input type="radio" name="mode" value="construction" checked> Construction（出 Section 4）</label>
+  <label><input type="radio" name="mode" value="private"> Private（不出 Section 4）</label>
+  <button type="button" onclick="window.print()">列印 / 存 PDF</button>
+</div>
+<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。可把此頁連結分享給同事使用。</p>
+<div id="out"></div>
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+let lastFile = null;
+drop.onclick = () => fileInput.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) run(e.dataTransfer.files[0]); };
+fileInput.onchange = () => { if (fileInput.files[0]) run(fileInput.files[0]); };
+document.querySelectorAll('input[name=dead], input[name=mode]').forEach(el => {
+  el.addEventListener('change', () => { if (lastFile) run(lastFile); });
+});
+document.getElementById('project').addEventListener('change', () => { if (lastFile) run(lastFile); });
+
+const s = v => String(v ?? '').trim();
+const esc = v => s(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const looks = v => {
+  const t = s(v).replace(/\s+/g,'');
+  if (!t || /^(nan|none|n\.?a\.?|-|item|sn|no|treeno|treenumber|treeid)$/i.test(t)) return false;
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return false;
+  if (!/\d/.test(t) || t.length > 32) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9\-_.\/]*[A-Za-z0-9]$/.test(t) || /^\d+[A-Za-z]?$/.test(t);
+};
+const isRemoved = r => /^removed(\s|$|,|;|\/)/i.test(r) || (/\bremoved\b/i.test(r) && !/trunk|branch/i.test(r));
+const ids = list => list.map(t => typeof t === 'string' ? esc(t) : esc(t.no)).join(', ') || '/';
+
+function findHeader(raw) {
+  for (let i = 0; i < Math.min(raw.length, 25); i++) {
+    const j = raw[i].map(x => String(x).toLowerCase().replace(/\n/g,' ')).join(' ');
+    const first = s(raw[i][0]).toLowerCase();
+    const hasId = j.includes('tree no') || j.includes('tree id') || j.includes('tree number') || j.includes('樹木編號') || j.includes('樹編號');
+    const hasSp = j.includes('scientific') || j.includes('species') || j.includes('樹種') || j.includes('dbh') || j.includes('zone');
+    if (hasId && hasSp && !j.includes('removed trees')) return i;
+    if (first === 'trmz' && j.includes('zone') && hasId) return i;
+  }
+  return -1;
+}
+
+function run(file) {
+  lastFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const wb = XLSX.read(e.target.result, { type: 'array' });
+    let raw = null, hr = 0, usedSheet = wb.SheetNames[0];
+    for (const name of wb.SheetNames) {
+      const tmp = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
+      const found = findHeader(tmp);
+      if (found >= 0) { raw = tmp; hr = found; usedSheet = name; break; }
+    }
+    if (!raw) {
+      raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+      hr = 0;
+    }
+    const hPrev = hr > 0 ? raw[hr-1].map(x => s(x).toLowerCase().replace(/\n/g,' ')) : [];
+    const h1 = raw[hr].map(x => s(x).toLowerCase().replace(/\n/g,' '));
+    const h2 = raw[hr+1] ? raw[hr+1].map(x => s(x).toLowerCase().replace(/\n/g,' ')) : [];
+    const nCols = Math.max(hPrev.length, h1.length, h2.length);
+    const combined = [];
+    for (let i = 0; i < nCols; i++) {
+      combined.push([hPrev[i]||'', h1[i]||'', h2[i]||''].filter(Boolean).join(' ').trim());
+    }
+    const find = (...kws) => combined.findIndex(t => kws.some(k => t.includes(k)));
+    const c = {
+      no: find('tree no','tree id','tree number','樹木編號','樹編號'),
+      sci: find('scientific'),
+      chi: find('chinese'),
+      dbh: find('dbh'),
+      ht: find('height'),
+      sp: find('spread','crown'),
+      health: find('health'),
+      struct: find('structural'),
+      triage: find('triage'),
+      rem: find('remark'),
+      rec: find('mitigation','recommend','proposed'),
+      zone: find('tree group') >= 0 ? find('tree group') : find('zone'),
+      source: find('tprp/new','tprp','newly found','new found'),
+    };
+    const dataStart = h2.some(v => /scientific|chinese|dbh/.test(v)) ? hr+2 : hr+1;
+    const deadAs = document.querySelector('input[name=dead]:checked').value;
+    if (c.source < 0 || raw.slice(dataStart, dataStart+30).filter(r => /tprp|\bnew\b/i.test(s(r[c.source]))).length < 3) {
+      for (let col = 0; col < nCols; col++) {
+        const hits = raw.slice(dataStart, dataStart+40).filter(r => /^(tprp|new)$/i.test(s(r[col]))).length;
+        if (hits >= 5) { c.source = col; break; }
+      }
+    }
+    const trees = [];
+    for (let i = dataStart; i < raw.length; i++) {
+      const r = raw[i] || [];
+      const no = s(r[c.no]).replace(/\s+/g,'');
+      if (!looks(no)) continue;
+      let sci = s(r[c.sci]), chi = s(r[c.chi]), remarks = s(r[c.rem]), rec = s(r[c.rec]);
+      if (deadAs === 'Unidentified' && /dead tree|^dead$/i.test(remarks + ' ' + sci)) { sci = 'Unidentified'; chi = 'Unidentified'; }
+      else if (/dead tree|^dead$/i.test(remarks + ' ' + sci)) { sci = 'Dead tree'; chi = '死樹'; }
+      trees.push({ no, sci, chi, dbh: s(r[c.dbh]), ht: s(r[c.ht]), spread: s(r[c.sp]),
+        health: s(r[c.health]), struct: s(r[c.struct]), triage: s(r[c.triage]),
+        remarks, rec, zone: s(r[c.zone]), source: s(r[c.source]) });
+    }
+    const active = trees.filter(t => !isRemoved(t.remarks) && !/duplicate|not in use|out of lot|construction|outside|boundary/i.test(t.remarks + ' ' + t.rec));
+    const species = {};
+    active.forEach(t => {
+      const k = t.sci + '|' + t.chi;
+      species[k] = (species[k]||0) + 1;
+    });
+    const spRows = Object.entries(species).map(([k,n]) => { const [sci,chi]=k.split('|'); return {sci,chi,n}; })
+      .sort((a,b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()));
+    const dom = Object.entries(species).sort((a,b)=>b[1]-a[1])[0];
+    const domSci = dom ? dom[0].split('|')[0] : 'N.A.';
+    const domRest = dom ? `${dom[0].split('|')[1]} (${dom[1]})`.trim() : '';
+    const PRUNE = /crown cleaning|crown reduction|crown raising|crown thinning|pruning|selective|defective branch|dead (trunk|branch)|co-dominant|epicormic/i;
+    const REM = /tree removal|\bfell(ing)?\b/i;
+    const prune = active.filter(t => PRUNE.test(t.rec));
+    const removal = active.filter(t => REM.test(t.rec));
+    const monitor = active.filter(t => /keep monitoring|monitoring/i.test(t.rec));
+    const pest = active.filter(t => /pest control|mistletoe/i.test(t.rec));
+    const others = active.filter(t => t.rec && !/^(n\.?a\.?|-|)$/i.test(t.rec) && !PRUNE.test(t.rec) && !REM.test(t.rec) && !/keep monitoring|monitoring|pest control|mistletoe/i.test(t.rec));
+    const pruneIds = [...new Set(prune.map(t => t.no))];
+    const monitorIds = monitor.map(t => t.no);
+    const pestIds = pest.map(t => t.no);
+    const removalIds = removal.map(t => t.no);
+    const reinspect = active.filter(t => /re-inspection/i.test(t.rec)).map(t => t.no);
+    const triage = col => active.filter(t => new RegExp('^'+col+'$','i').test(t.triage));
+    const y = triage('Yellow'), o = triage('Orange'), reds = triage('Red'), blk = triage('Black');
+    const formA = active.filter(t => /yellow|orange|red|black/i.test(t.triage) || (t.rec && !/^(n\.?a\.?|-|no mitigation)/i.test(t.rec)));
+    const formB = active.filter(t => !formA.includes(t));
+
+    const mode = document.querySelector('input[name=mode]:checked').value;
+    const isTG = v => {
+      const t = s(v).replace(/\s+/g,'');
+      return /^(TG)?\d{3,5}$/i.test(t);
+    };
+    const normTG = v => {
+      const t = s(v).replace(/\s+/g,'').replace(/^TG/i,'');
+      return 'TG' + t;
+    };
+    const allGroupSet = new Set();
+    for (let i = dataStart; i < raw.length; i++) {
+      const z = raw[i][c.zone];
+      if (isTG(z)) allGroupSet.add(normTG(z));
+    }
+    const groups = [...allGroupSet].sort((a,b) => (parseInt(a.replace(/\D/g,''))||0) - (parseInt(b.replace(/\D/g,''))||0));
+    const groupsWithTrees = [...new Set(active.map(t => isTG(t.zone) ? normTG(t.zone) : '').filter(Boolean))]
+      .sort((a,b) => (parseInt(a.replace(/\D/g,''))||0) - (parseInt(b.replace(/\D/g,''))||0));
+    const tprpN = active.filter(t => /tprp/i.test(t.source)).length;
+    const newN = active.filter(t => /\bnew\b|newly/i.test(t.source)).length;
+    const deadN = active.filter(t => /unidentified|dead/i.test(t.sci + ' ' + t.remarks)).length;
+    const aliveN = active.length - deadN;
+    const speciesLive = spRows.filter(x => !/unidentified|dead/i.test(x.sci));
+    const joinAnd = arr => arr.length > 1 ? arr.slice(0,-1).join(', ') + ', and ' + arr[arr.length-1] : (arr[0] || 'the site');
+    const groupList = joinAnd(groups);
+    const withList = joinAnd(groupsWithTrees.length ? groupsWithTrees : groups);
+    const project = s(document.getElementById('project').value);
+    const projectPhrase = project ? ' at ' + project : '';
+    const section4Plain = `This tree survey was conducted within ${groups.length} existing Tree Groups, of which ${groupsWithTrees.length} were found to contain trees. The surveyed Tree Groups are ${groupList}. The trees covered in this submission are located within existing planting areas in ${withList}, all of which fall within the site boundary. This initial tree survey contains total of ${active.length} nos. of surveyed tree. ${tprpN} nos. of trees recorded in the form of tree groups in TPRP and ${newN} nos. of trees newly found in the survey. The photographic record in Appendix C – Tree Photographic Records shows the condition and character of the vegetation covering this submission.
+
+For the newfound trees, refer to below Table 1, a total of ${speciesLive.length} species were identified in this submission. The location of the tree group trees and newfound trees are shown on the Tree Survey Plan and Tree Treatment Plan in Appendix A.
+A total of ${speciesLive.length} species were recorded during the survey and are represented throughout the survey area. No rare tree species, Registered Old and Valuable Trees (OVT), and Stonewall Trees were found during the inspection. ${deadN} dead trees with unknown species were observed in the survey area.
+Species composition of the survey area is summarized in the following table:
+
+SECTION 4
+CONCLUSION
+
+A tree survey has been carried out within the respective Project Area${projectPhrase}, to record the number of trees, species name, trunk diameters, height, crown spread, tree form, health condition.
+Based on the site inspection conducted prior to the commencement of works, total of ${active.length} nos. of surveyed tree. All the surveyed trees are recorded in the form of tree groups in TPRP, comprising ${aliveN} alive trees and ${deadN} dead trees. No rare or protected species as listed under Cap.96 and Cap.586 were recorded.
+Total Number of Trees Found On-Site:
+${aliveN} (Alive) + ${deadN} (Dead Trees) = ${active.length}`;
+    const section4 = mode === 'construction' ? `
+      <h2>Section 4<br>Conclusion</h2>
+      <textarea id="s4text" readonly></textarea>
+      <p class="noprint"><button type="button" onclick="const t=document.getElementById('s4text'); t.focus(); t.select(); document.execCommand('copy');">全選並複製</button></p>
+    ` : '';
+
+    const monthYear = new Date().toLocaleString('en',{month:'long',year:'numeric'});
+    document.getElementById('out').innerHTML = `
+      <h1>Tree Risk Assessment Report</h1>
+      <p style="text-align:center">Schedule to Form 1<br>${esc(monthYear)}</p>
+      ${section4}
+      <h2>Section 5<br>Tree Survey Findings</h2>
+      <p>A total of ${active.length} trees and ${spRows.length} species were recorded. The dominant species is <span class="sci">${esc(domSci)}</span> ${esc(domRest)}.</p>
+      <table><tr><th>Tree Species</th><th>Quantity</th></tr>
+      ${spRows.map(x => `<tr><td><span class="sci">${esc(x.sci)}</span> ${esc(x.chi)}</td><td>${x.n}</td></tr>`).join('')}
+      <tr><td>Total number of trees</td><td>${active.length}</td></tr></table>
+      <p>TRIAGE colour summary</p>
+      <table><tr><th>Colour</th><th>No. of trees</th><th>Tree No.</th></tr>
+      ${[['Black',blk],['Red',reds],['Orange',o],['Yellow',y]].map(([c,a]) => `<tr><td>${c}</td><td>${a.length}</td><td>${ids(a)}</td></tr>`).join('')}
+      </table>
+      <h2>Section 6<br>Tree Risk Assessment Findings</h2>
+      <p>A total of ${prune.length} trees were recommended for pruning, ${removal.length} number were recommended for tree removal, ${monitor.length} for keep monitoring, ${pest.length} for pest control, and ${others.length} for other mitigation measures. (See Table 1). The proposed mitigations for specific trees are summarised in the table (See Table 2). For details, please refer to Section 7 – Appendix D (Tree inventory).</p>
+      <p>Summary of tree numbers by recommendation</p>
+      <table><tr><th>Recommendation</th><th>No. of trees</th><th>Tree No.</th></tr>
+      <tr><td>Pruning (unique, no duplicate tree no.)</td><td>${pruneIds.length}</td><td>${ids(pruneIds)}</td></tr>
+      <tr><td>Tree removal</td><td>${removalIds.length}</td><td>${ids(removalIds)}</td></tr>
+      <tr><td>Re-inspection</td><td>${reinspect.length}</td><td>${ids(reinspect)}</td></tr>
+      <tr><td>Keep monitoring</td><td>${monitorIds.length}</td><td>${ids(monitorIds)}</td></tr>
+      <tr><td>Pest control / mistletoe</td><td>${pestIds.length}</td><td>${ids(pestIds)}</td></tr>
+      </table>
+      <p>Table 1. The summary of tree amounts with proposed mitigation measures</p>
+      <table><tr><th>Recommendations</th><th>No. of trees</th></tr>
+      <tr><td>Tree pruning</td><td>${prune.length}</td></tr>
+      <tr><td>Tree removal</td><td>${removal.length}</td></tr>
+      <tr><td>Keep monitoring</td><td>${monitor.length}</td></tr>
+      <tr><td>Pest control / mistletoe</td><td>${pest.length}</td></tr>
+      <tr><td>Other mitigation measures</td><td>${others.length}</td></tr>
+      </table>
+      <p>Table 2. Detailed mitigation measures</p>
+      <p>Tree pruning:<br>${ids(pruneIds)}</p>
+      <p>Tree removal:<br>${ids(removalIds)}</p>
+      <p>Re-inspection:<br>${ids(reinspect)}</p>
+      <p>Keep monitoring:<br>${ids(monitorIds)}</p>
+      <p>Pest control / mistletoe:<br>${ids(pestIds)}</p>
+      <p>Other mitigation measures:<br>${ids(others)}</p>
+      <h2>Form 1 Table (A) — Triage / Remedial (${formA.length})</h2>
+      <table><tr><th>Tree No</th><th>Species</th><th>DBH</th><th>Height</th><th>Triage</th><th>Remedial</th></tr>
+      ${formA.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}</td><td>${esc(t.dbh)}</td><td>${esc(t.ht)}</td><td>${esc(t.triage)}</td><td>${esc(t.rec)}</td></tr>`).join('')}
+      </table>
+      <h2>Form 1 Table (B) — Other trees (${formB.length})</h2>
+      <p class="note">品種摘要見 Section 5。有效總數 ${active.length}（已排除 Removed）。工作表：${esc(usedSheet)}</p>
+    `;
+    const box = document.getElementById('s4text');
+    if (box) box.value = section4Plain;
+  };
+  reader.readAsArrayBuffer(file);
+}
+</script>
+</body>
+</html>
