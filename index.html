@@ -28,7 +28,8 @@
 <div id="drop">把 Tree Assessment Schedule（.xlsx / .xls）拖到這裡，或點擊選擇檔案</div>
 <input type="file" id="file" accept=".xlsx,.xls" hidden>
 <div class="opts">
-  <label>工程名稱 <input type="text" id="project" placeholder="例如：Queen Mary Hospital（可留空）"></label>
+  <label>工程名稱 <input type="text" id="project" placeholder="可留空；會嘗試由表頭自動讀取"></label>
+  <label>額外 Tree Groups（冇樹都要列入） <input type="text" id="extraGroups" placeholder="例如：TG769"></label>
   <label><input type="radio" name="dead" value="Unidentified" checked> Dead tree → Unidentified</label>
   <label><input type="radio" name="dead" value="Dead tree"> Dead tree → Dead tree</label>
   <label><input type="radio" name="mode" value="construction" checked> Construction（出 Section 4）</label>
@@ -49,7 +50,9 @@ fileInput.onchange = () => { if (fileInput.files[0]) run(fileInput.files[0]); };
 document.querySelectorAll('input[name=dead], input[name=mode]').forEach(el => {
   el.addEventListener('change', () => { if (lastFile) run(lastFile); });
 });
-document.getElementById('project').addEventListener('change', () => { if (lastFile) run(lastFile); });
+['project','extraGroups'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => { if (lastFile) run(lastFile); });
+});
 
 const s = v => String(v ?? '').trim();
 const esc = v => s(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -62,6 +65,37 @@ const looks = v => {
 };
 const isRemoved = r => /^removed(\s|$|,|;|\/)/i.test(r) || (/\bremoved\b/i.test(r) && !/trunk|branch/i.test(r));
 const ids = list => list.map(t => typeof t === 'string' ? esc(t) : esc(t.no)).join(', ') || '/';
+const isTG = v => {
+  const t = s(v).replace(/\s+/g,'');
+  return /^(TG)?\d{3,5}$/i.test(t);
+};
+const normTG = v => {
+  const t = s(v).replace(/\s+/g,'').replace(/^TG/i,'');
+  return 'TG' + t;
+};
+const parseExtraGroups = v => s(v).split(/[,;，、\s]+/).map(x => x.trim()).filter(isTG).map(normTG);
+const isBlankGroup = v => {
+  const t = s(v);
+  return !t || /^(n\.?a\.?|nan|-)$/i.test(t);
+};
+function classifySource(t) {
+  if (isTG(t.zone)) return 'TPRP';
+  if (isBlankGroup(t.zone)) return 'NEW';
+  if (/tprp/i.test(t.source)) return 'TPRP';
+  if (/\bnew\b|newly/i.test(t.source)) return 'NEW';
+  return '';
+}
+function detectProject(raw, hr) {
+  const skip = /tree assessment schedule|initial tree survey|tree inventory|^nan$/i;
+  let best = '';
+  for (let i = 0; i < hr; i++) {
+    for (const cell of (raw[i] || [])) {
+      const t = s(cell).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (t.length > best.length && t.length > 20 && !skip.test(t)) best = t;
+    }
+  }
+  return best;
+}
 
 function findHeader(raw) {
   for (let i = 0; i < Math.min(raw.length, 25); i++) {
@@ -163,31 +197,24 @@ function run(file) {
     const formB = active.filter(t => !formA.includes(t));
 
     const mode = document.querySelector('input[name=mode]:checked').value;
-    const isTG = v => {
-      const t = s(v).replace(/\s+/g,'');
-      return /^(TG)?\d{3,5}$/i.test(t);
-    };
-    const normTG = v => {
-      const t = s(v).replace(/\s+/g,'').replace(/^TG/i,'');
-      return 'TG' + t;
-    };
     const allGroupSet = new Set();
     for (let i = dataStart; i < raw.length; i++) {
       const z = raw[i][c.zone];
       if (isTG(z)) allGroupSet.add(normTG(z));
     }
-    const groups = [...allGroupSet].sort((a,b) => (parseInt(a.replace(/\D/g,''))||0) - (parseInt(b.replace(/\D/g,''))||0));
-    const groupsWithTrees = [...new Set(active.map(t => isTG(t.zone) ? normTG(t.zone) : '').filter(Boolean))]
-      .sort((a,b) => (parseInt(a.replace(/\D/g,''))||0) - (parseInt(b.replace(/\D/g,''))||0));
-    const tprpN = active.filter(t => /tprp/i.test(t.source)).length;
-    const newN = active.filter(t => /\bnew\b|newly/i.test(t.source)).length;
+    parseExtraGroups(document.getElementById('extraGroups').value).forEach(g => allGroupSet.add(g));
+    const byNum = (a,b) => (parseInt(a.replace(/\D/g,''))||0) - (parseInt(b.replace(/\D/g,''))||0);
+    const groups = [...allGroupSet].sort(byNum);
+    const groupsWithTrees = [...new Set(active.map(t => isTG(t.zone) ? normTG(t.zone) : '').filter(Boolean))].sort(byNum);
+    const tprpN = active.filter(t => classifySource(t) === 'TPRP').length;
+    const newN = active.filter(t => classifySource(t) === 'NEW').length;
     const deadN = active.filter(t => /unidentified|dead/i.test(t.sci + ' ' + t.remarks)).length;
     const aliveN = active.length - deadN;
     const speciesLive = spRows.filter(x => !/unidentified|dead/i.test(x.sci));
     const joinAnd = arr => arr.length > 1 ? arr.slice(0,-1).join(', ') + ', and ' + arr[arr.length-1] : (arr[0] || 'the site');
     const groupList = joinAnd(groups);
     const withList = joinAnd(groupsWithTrees.length ? groupsWithTrees : groups);
-    const project = s(document.getElementById('project').value);
+    const project = s(document.getElementById('project').value) || detectProject(raw, hr);
     const projectPhrase = project ? ' at ' + project : '';
     const section4Plain = `This tree survey was conducted within ${groups.length} existing Tree Groups, of which ${groupsWithTrees.length} were found to contain trees. The surveyed Tree Groups are ${groupList}. The trees covered in this submission are located within existing planting areas in ${withList}, all of which fall within the site boundary. This initial tree survey contains total of ${active.length} nos. of surveyed tree. ${tprpN} nos. of trees recorded in the form of tree groups in TPRP and ${newN} nos. of trees newly found in the survey. The photographic record in Appendix C – Tree Photographic Records shows the condition and character of the vegetation covering this submission.
 
@@ -252,7 +279,7 @@ ${aliveN} (Alive) + ${deadN} (Dead Trees) = ${active.length}`;
       ${formA.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}</td><td>${esc(t.dbh)}</td><td>${esc(t.ht)}</td><td>${esc(t.triage)}</td><td>${esc(t.rec)}</td></tr>`).join('')}
       </table>
       <h2>Form 1 Table (B) — Other trees (${formB.length})</h2>
-      <p class="note">品種摘要見 Section 5。有效總數 ${active.length}（已排除 Removed）。工作表：${esc(usedSheet)}</p>
+      <p class="note">品種摘要見 Section 5。有效總數 ${active.length}（已排除 Removed）。TPRP ${tprpN}／新發現 ${newN}。工作表：${esc(usedSheet)}</p>
     `;
     const box = document.getElementById('s4text');
     if (box) box.value = section4Plain;
