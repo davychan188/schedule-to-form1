@@ -21,7 +21,10 @@
   .opts input[type="text"] { font-family: inherit; font-size: 14px; padding: 4px 8px; min-width: 280px; }
   .opts button { font-family: inherit; font-size: 14px; padding: 6px 12px; cursor: pointer; }
   #s4text { width: 100%; height: 220px; font-family: inherit; font-size: 14px; padding: 10px; user-select: text; cursor: text; box-sizing: border-box; }
-  @media print { #drop, .opts, .note, .noprint { display: none; } }
+  .warn { background: #fff6e5; border: 1px solid #c47b00; color: #5c3a00; padding: 12px 14px; margin: 0 0 18px; border-radius: 8px; font-family: Arial, sans-serif; font-size: 14px; }
+  .warn h3 { margin: 0 0 8px; font-size: 15px; color: #8a4b00; }
+  .warn table th { background: #c47b00; }
+  @media print { #drop, .opts, .note, .noprint, .warn { display: none; } }
 </style>
 </head>
 <body>
@@ -64,6 +67,11 @@ const looks = v => {
   return /^[A-Za-z0-9][A-Za-z0-9\-_.\/]*[A-Za-z0-9]$/.test(t) || /^\d+[A-Za-z]?$/.test(t);
 };
 const isRemoved = r => /^removed(\s|$|,|;|\/)/i.test(r) || (/\bremoved\b/i.test(r) && !/trunk|branch/i.test(r));
+const isDeadSpecies = (sci, chi) => /dead\s*trees?|^dead$|unidentified|死樹|枯樹/i.test((s(sci) + ' ' + s(chi)).trim());
+const remarkIsDeadTree = rem => {
+  const t = s(rem);
+  return /dead\s*trees?|死樹|枯樹/i.test(t) || /^dead\.?$/i.test(t);
+};
 const ids = list => list.map(t => typeof t === 'string' ? esc(t) : esc(t.no)).join(', ') || '/';
 const isTG = v => {
   const t = s(v).replace(/\s+/g,'');
@@ -133,6 +141,10 @@ function run(file) {
       combined.push([hPrev[i]||'', h1[i]||'', h2[i]||''].filter(Boolean).join(' ').trim());
     }
     const find = (...kws) => combined.findIndex(t => kws.some(k => t.includes(k)));
+    const findSkip = (kws, skips) => {
+      const i = combined.findIndex(t => kws.some(k => t.includes(k)) && !skips.some(x => t.includes(x)));
+      return i >= 0 ? i : find(...kws);
+    };
     const c = {
       no: find('tree no','tree id','tree number','樹木編號','樹編號'),
       sci: find('scientific'),
@@ -143,7 +155,7 @@ function run(file) {
       health: find('health'),
       struct: find('structural'),
       triage: find('triage'),
-      rem: find('remark'),
+      rem: findSkip(['remark'], ['remarks*', 'suitability']),
       rec: find('mitigation','recommend','proposed'),
       zone: find('tree group') >= 0 ? find('tree group') : find('zone'),
       source: find('tprp/new','tprp','newly found','new found'),
@@ -157,11 +169,15 @@ function run(file) {
       }
     }
     const trees = [];
+    const speciesRemarkDead = [];
     for (let i = dataStart; i < raw.length; i++) {
       const r = raw[i] || [];
       const no = s(r[c.no]).replace(/\s+/g,'');
       if (!looks(no)) continue;
       let sci = s(r[c.sci]), chi = s(r[c.chi]), remarks = s(r[c.rem]), rec = s(r[c.rec]);
+      if (remarkIsDeadTree(remarks) && !isDeadSpecies(sci, chi)) {
+        speciesRemarkDead.push({ no, sci, chi, remarks });
+      }
       if (deadAs === 'Unidentified' && /dead tree|^dead$/i.test(remarks + ' ' + sci)) { sci = 'Unidentified'; chi = 'Unidentified'; }
       else if (/dead tree|^dead$/i.test(remarks + ' ' + sci)) { sci = 'Dead tree'; chi = '死樹'; }
       trees.push({ no, sci, chi, dbh: s(r[c.dbh]), ht: s(r[c.ht]), spread: s(r[c.sp]),
@@ -236,7 +252,16 @@ ${aliveN} (Alive) + ${deadN} (Dead Trees) = ${active.length}`;
     ` : '';
 
     const monthYear = new Date().toLocaleString('en',{month:'long',year:'numeric'});
+    const warnBox = speciesRemarkDead.length ? `
+      <div class="warn noprint">
+        <h3>請核對：${speciesRemarkDead.length} 棵樹的 Tree species 不是 Dead tree，但 Remarks 寫了 Dead tree</h3>
+        <table><tr><th>Tree No</th><th>Tree species</th><th>Remarks</th></tr>
+        ${speciesRemarkDead.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}</td><td>${esc(t.remarks)}</td></tr>`).join('')}
+        </table>
+        <p>報告仍會按 Dead tree 處理這些樹；請在 Schedule 更正品種或備註。</p>
+      </div>` : '';
     document.getElementById('out').innerHTML = `
+      ${warnBox}
       <h1>Tree Risk Assessment Report</h1>
       <p style="text-align:center">Schedule to Form 1<br>${esc(monthYear)}</p>
       ${section4}
