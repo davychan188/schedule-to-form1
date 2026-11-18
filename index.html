@@ -301,15 +301,150 @@ function collectRemarkMismatches(trees) {
     for (const item of splitRemarks(t.remarks)) {
       const m = bestDefect(item);
       if (m.type === 'exact') continue;
-      const key = item + '\0' + m.type + '\0' + m.official;
-      if (!map.has(key)) map.set(key, { item, type: m.type, official: m.official, nos: [] });
-      map.get(key).nos.push(t.no);
+      if (!map.has(item)) map.set(item, { item, nos: [] });
+      map.get(item).nos.push(t.no);
     }
   }
-  const rank = typ => typ === 'similar' ? 0 : 1;
-  return [...map.values()].sort((a, b) => rank(a.type) - rank(b.type) || b.nos.length - a.nos.length || a.item.localeCompare(b.item));
+  return [...map.values()].sort((a, b) => b.nos.length - a.nos.length || a.item.localeCompare(b.item));
 }
 const ids = list => list.map(t => typeof t === 'string' ? esc(t) : esc(t.no)).join(', ') || '/';
+const joinNos = list => (list && list.length) ? list.map(t => typeof t === 'string' ? t : t.no).join(', ') : '/';
+function formSpeciesText(sci, chi) {
+  return s(sci) + s(chi);
+}
+function numVal(v) {
+  const t = s(v).replace(/,/g, '');
+  if (!t || /^(n\.?a\.?|-|\/)$/i.test(t)) return null;
+  const n = parseFloat(t);
+  return Number.isFinite(n) ? n : null;
+}
+function numOut(n) {
+  if (n == null || n === '') return '';
+  return Number.isInteger(n) ? n : n;
+}
+function formZone(v) {
+  const t = s(v);
+  if (!t || /^(n\.?a\.?|-|\/)$/i.test(t)) return '';
+  return isTG(t) ? normTG(t) : t;
+}
+function formDate(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return v.getUTCDate() + '/' + (v.getUTCMonth() + 1) + '/' + v.getUTCFullYear();
+  }
+  const t = s(v);
+  if (!t || /^(n\.?a\.?|-|\/)$/i.test(t)) return '';
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return (+m[3]) + '/' + (+m[2]) + '/' + m[1];
+  m = t.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m) {
+    let d = +m[1], mo = +m[2], y = +m[3];
+    if (y < 100) y += 2000;
+    return d + '/' + mo + '/' + y;
+  }
+  if (/^\d+(\.\d+)?$/.test(t)) {
+    const n = parseFloat(t);
+    if (n > 20000 && n < 80000) {
+      const dt = new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000);
+      return dt.getUTCDate() + '/' + (dt.getUTCMonth() + 1) + '/' + dt.getUTCFullYear();
+    }
+  }
+  return t;
+}
+function conditionLabel(raw) {
+  const t = s(raw).toLowerCase();
+  if (!t || /^(n\.?a\.?|-|\/)$/i.test(t)) return '';
+  if (/^(g|good)$/.test(t) || t === '好') return 'Normal 正常';
+  if (/^(a|average)$/.test(t) || t === '普通' || t === '中等') return 'Fair 一般';
+  if (/^(p|poor)$/.test(t)) return 'Poor 差';
+  if (/^(d|dead)$/.test(t)) return 'Dead Tree 死樹';
+  if (/^(n|normal)$/.test(t)) return 'Normal 正常';
+  if (/^(f|fair)$/.test(t)) return 'Fair 一般';
+  if (/^(vp|v\.p\.?|very\s*poor)$/.test(t)) return 'Very Poor 十分差';
+  if (/dead\s*trees?|死樹/.test(t)) return 'Dead Tree 死樹';
+  if (/very\s*poor|十分差/.test(t)) return 'Very Poor 十分差';
+  if (/(^|\s)poor(\s|$)|差/.test(t) && !/fair|very\s*poor|十分差|一般/.test(t)) return 'Poor 差';
+  if (/average|fair|一般/.test(t)) return 'Fair 一般';
+  if (/normal|good|正常/.test(t)) return 'Normal 正常';
+  return s(raw);
+}
+function conditionRank(label) {
+  const t = s(label);
+  if (!t || t === '-') return -1;
+  if (t === 'Dead Tree 死樹' || /^dead$/i.test(t)) return 4;
+  if (t === 'Very Poor 十分差') return 3;
+  if (t === 'Poor 差') return 2;
+  if (t === 'Fair 一般') return 1;
+  if (t === 'Normal 正常') return 0;
+  return 0;
+}
+function overallCondition(t) {
+  const a = conditionLabel(t.health);
+  const b = conditionLabel(t.struct);
+  if (!a && !b) return '';
+  return conditionRank(a) >= conditionRank(b) ? (a || b) : b;
+}
+function triageLabel(raw) {
+  const t = s(raw).toLowerCase();
+  if (/black|黑/.test(t)) return 'Black 黑';
+  if (/red|紅/.test(t)) return 'Red 紅';
+  if (/orange|橙/.test(t)) return 'Orange 橙';
+  if (/yellow|黃/.test(t)) return 'Yellow 黃';
+  return 'No 無';
+}
+function treeStatusLabel(t) {
+  const raw = s(t.status);
+  const blob = raw + ' ' + s(t.remarks);
+  if (/stonewall|石牆/i.test(blob)) return 'Stonewall Tree 石牆樹';
+  if (/\bovt\b|古樹名木/i.test(blob)) return 'OVT 古樹名木';
+  if (/other trees|其他樹木/i.test(raw)) return 'Other Trees 其他樹木';
+  if (/large tree|大樹/i.test(raw)) return 'Large Tree 大樹';
+  if (/yellow|orange|red/i.test(t.triage)) return 'Large Tree 大樹';
+  return 'Other Trees 其他樹木';
+}
+function formARows(list) {
+  return (list || []).map(t => ({
+    no: t.no,
+    zone: formZone(t.zone),
+    species: formSpeciesText(t.sci, t.chi),
+    sci: t.sci,
+    chi: t.chi,
+    dbh: s(t.dbh),
+    ht: s(t.ht),
+    spread: s(t.spread),
+    status: treeStatusLabel(t),
+    condition: overallCondition(t),
+    triage: triageLabel(t.triage),
+    rec: s(t.rec),
+    date: formDate(t.complete)
+  }));
+}
+function formBGroups(list) {
+  const map = {};
+  (list || []).forEach(t => {
+    const species = formSpeciesText(t.sci, t.chi);
+    const k = species.toLowerCase();
+    if (!map[k]) map[k] = { species, sci: t.sci, chi: t.chi, n: 0, hts: [], conds: {} };
+    map[k].n++;
+    const h = numVal(t.ht);
+    if (h != null) map[k].hts.push(h);
+    const lab = conditionLabel(t.health) || '-';
+    map[k].conds[lab] = (map[k].conds[lab] || 0) + 1;
+  });
+  return Object.values(map).sort((a, b) => a.species.toLowerCase().localeCompare(b.species.toLowerCase())).map(g => {
+    const entries = Object.entries(g.conds);
+    entries.sort((a, b) => b[1] - a[1] || conditionRank(a[0]) - conditionRank(b[0]));
+    return {
+      species: g.species,
+      sci: g.sci,
+      chi: g.chi,
+      n: g.n,
+      from: g.hts.length ? numOut(Math.min(...g.hts)) : '',
+      to: g.hts.length ? numOut(Math.max(...g.hts)) : '',
+      condition: entries.length ? entries[0][0] : '-'
+    };
+  });
+}
+
 const isTG = v => {
   const t = s(v).replace(/\s+/g,'');
   return /^(TG)?\d{3,5}$/i.test(t);
@@ -504,20 +639,7 @@ function wTable(rows, total) {
   }</w:tr>`;
   return `<w:tbl><w:tblPr><w:tblW w:w="8400" w:type="dxa"/>${borders}<w:tblLayout w:type="fixed"/></w:tblPr>${grid}${headerRow}${body}${totalRow}</w:tbl>${wP('')}`;
 }
-function buildDocx(rep) {
-  const blocks = [];
-  blocks.push(wTextP('3.3 Species and OVT in approved TPRP', 'Heading2', {b:true}));
-  blocks.push(wTextP(rep.section33Intro));
-  blocks.push(wTable(rep.species, rep.total));
-  blocks.push(wTextP('SECTION 4', 'Heading2', {b:true}));
-  blocks.push(wTextP('CONCLUSION', 'Heading2', {b:true}));
-  blocks.push(wTextP(rep.section4Body));
-  blocks.push(wTextP('Tree Group Summary', 'Heading2', {b:true}));
-  for (const g of rep.groupBlocks) {
-    blocks.push(wTextP(g.title, null, {b:true}));
-    if (g.rows.length) blocks.push(wTable(g.rows, g.total));
-    else blocks.push(wTextP('No tree was found in this Tree Group.'));
-  }
+function packDocx(blocks) {
   const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${blocks.join('')}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr></w:body></w:document>`;
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -555,6 +677,46 @@ function buildDocx(rep) {
     {name: 'word/styles.xml', data: styles}
   ]);
 }
+function wGrid(headers, dataRows, widths) {
+  const b = n => `<w:${n} w:val="single" w:sz="4" w:space="0" w:color="000000"/>`;
+  const borders = `<w:tblBorders>${b('top')}${b('left')}${b('bottom')}${b('right')}${b('insideH')}${b('insideV')}</w:tblBorders>`;
+  const grid = `<w:tblGrid>${widths.map(w => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`;
+  const totalW = widths.reduce((a, c) => a + c, 0);
+  const runsOf = content => {
+    if (Array.isArray(content)) return content.map(x => typeof x === 'string' ? wRun(x) : wRun(x.text ?? '', x)).join('');
+    if (content && typeof content === 'object') return wRun(content.text ?? '', content);
+    return wRun(String(content ?? ''));
+  };
+  const cell = (i, content) => wCell(wP(runsOf(content)), widths[i]);
+  const headerRow = `<w:tr>${headers.map((h, i) => cell(i, {text: h, b: true})).join('')}</w:tr>`;
+  const body = dataRows.map(row => `<w:tr>${row.map((c, i) => cell(i, c)).join('')}</w:tr>`).join('');
+  return `<w:tbl><w:tblPr><w:tblW w:w="${totalW}" w:type="dxa"/>${borders}<w:tblLayout w:type="fixed"/></w:tblPr>${grid}${headerRow}${body}</w:tbl>${wP('')}`;
+}
+function formSpeciesRuns(t) {
+  return isItalicSci(t.sci, t.chi)
+    ? [{text: t.sci, i: true}, {text: t.chi ? ' ' + t.chi : ''}]
+    : (t.sci + (t.chi ? ' ' + t.chi : ''));
+}
+function formTableRows(list) {
+  return list.map(t => [t.no, formSpeciesRuns(t), t.dbh, t.ht, t.triage, t.rec]);
+}
+function buildDocx(rep) {
+  if (rep.mode === 'private') return buildPrivateDocx(rep);
+  const blocks = [];
+  blocks.push(wTextP('3.3 Species and OVT in approved TPRP', 'Heading2', {b:true}));
+  blocks.push(wTextP(rep.section33Intro));
+  blocks.push(wTable(rep.species, rep.total));
+  blocks.push(wTextP('SECTION 4', 'Heading2', {b:true}));
+  blocks.push(wTextP('CONCLUSION', 'Heading2', {b:true}));
+  blocks.push(wTextP(rep.section4Body));
+  blocks.push(wTextP('Tree Group Summary', 'Heading2', {b:true}));
+  for (const g of rep.groupBlocks) {
+    blocks.push(wTextP(g.title, null, {b:true}));
+    if (g.rows.length) blocks.push(wTable(g.rows, g.total));
+    else blocks.push(wTextP('No tree was found in this Tree Group.'));
+  }
+  return packDocx(blocks);
+}
 
 function colLetter(n) {
   let s = '';
@@ -568,7 +730,7 @@ function xCell(r, c, value, style, type) {
   if (value === '' || value == null) return `<c r="${ref}" s="${style}"/>`;
   return `<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(value)}</t></is></c>`;
 }
-function xSheet(name, rows, cols) {
+function xSheet(name, rows, cols, widths) {
   const maxR = rows.length;
   const maxC = cols || 4;
   const dim = `A1:${colLetter(maxC - 1)}${Math.max(maxR, 1)}`;
@@ -580,17 +742,15 @@ function xSheet(name, rows, cols) {
     }).join('');
     return `<row r="${r}">${cells}</row>`;
   }).join('');
+  const colXml = (widths && widths.length)
+    ? widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')
+    : `<col min="1" max="1" width="8" customWidth="1"/><col min="2" max="2" width="42" customWidth="1"/><col min="3" max="3" width="28" customWidth="1"/><col min="4" max="4" width="14" customWidth="1"/>`;
   return {name, xml: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <dimension ref="${dim}"/>
   <sheetViews><sheetView workbookViewId="0"/></sheetViews>
   <sheetFormatPr defaultRowHeight="15"/>
-  <cols>
-    <col min="1" max="1" width="8" customWidth="1"/>
-    <col min="2" max="2" width="42" customWidth="1"/>
-    <col min="3" max="3" width="28" customWidth="1"/>
-    <col min="4" max="4" width="14" customWidth="1"/>
-  </cols>
+  <cols>${colXml}</cols>
   <sheetData>${sheetData}</sheetData>
 </worksheet>`};
 }
@@ -619,20 +779,64 @@ function xTableRows(startTitle, rows, total) {
   ]);
   return out;
 }
-function buildXlsx(rep) {
-  const speciesRows = xTableRows('', rep.species, rep.total);
-  const s4rows = String(rep.section4Body).split('\n').map(line => [{v: line, s: 0, t: 's'}]);
-  const tgRows = [];
-  for (const g of rep.groupBlocks) {
-    if (tgRows.length) tgRows.push([]);
-    if (g.rows.length) tgRows.push(...xTableRows(g.title, g.rows, g.total));
-    else { tgRows.push([{v: g.title, s: 2, t: 's'}]); tgRows.push([{v: 'No tree was found in this Tree Group.', s: 0, t: 's'}]); }
+function buildPrivateDocx(rep) {
+  const blocks = [];
+  blocks.push(wTextP('Tree Risk Assessment Report', 'Heading2', {b:true}));
+  if (rep.project) blocks.push(wTextP(rep.project, null, {b:true}));
+  if (rep.monthYear) blocks.push(wTextP(rep.monthYear));
+  blocks.push(wTextP('Section 5', 'Heading2', {b:true}));
+  blocks.push(wTextP('Tree Survey Findings', 'Heading2', {b:true}));
+  blocks.push(wTextP(rep.section5Intro));
+  blocks.push(wTable(rep.species, rep.total));
+  blocks.push(wTextP('TRIAGE colour summary', null, {b:true}));
+  blocks.push(wGrid(['Colour', 'No. of trees', 'Tree No.'],
+    (rep.triageRows || []).map(x => [x.colour, String(x.n), x.nos]),
+    [1600, 1400, 5400]));
+  blocks.push(wTextP('Section 6', 'Heading2', {b:true}));
+  blocks.push(wTextP('Tree Risk Assessment Findings', 'Heading2', {b:true}));
+  blocks.push(wTextP(rep.section6Intro));
+  blocks.push(wTextP('Summary of tree numbers by recommendation', null, {b:true}));
+  blocks.push(wGrid(['Recommendation', 'No. of trees', 'Tree No.'],
+    (rep.recSummary || []).map(x => [x.label, String(x.n), x.nos]),
+    [3200, 1400, 3800]));
+  blocks.push(wTextP('Table 1. The summary of tree amounts with proposed mitigation measures'));
+  blocks.push(wGrid(['Recommendations', 'No. of trees'],
+    (rep.recTable1 || []).map(x => [x.label, String(x.n)]),
+    [5000, 2000]));
+  blocks.push(wTextP('Table 2. Detailed mitigation measures'));
+  for (const d of (rep.recDetails || [])) {
+    blocks.push(wTextP(d.label + ':'));
+    blocks.push(wTextP(d.nos));
   }
-  const sheets = [
-    xSheet('3.3 Species', speciesRows, 4),
-    xSheet('Section 4', [[{v: 'SECTION 4', s: 2, t: 's'}], [{v: 'CONCLUSION', s: 2, t: 's'}], [], ...s4rows], 1),
-    xSheet('Tree Groups', tgRows.length ? tgRows : [[{v: 'No tree group', s: 0, t: 's'}]], 4)
-  ];
+  const formAH = ['Dept. Tree ID', 'Zone', 'Tree Species (Scientific + Chinese)', 'DBH (mm)', 'Est. Height (m)', 'Est. Crown Spread (m)', 'Tree Status', 'Overall Tree Conditions', 'Triage Colour', 'Remedial Action', 'Anticipated Completion Date'];
+  const formAW = [900, 600, 1400, 700, 700, 800, 900, 1000, 800, 1100, 800];
+  const formAView = rep.formAView || formARows(rep.formA || []);
+  blocks.push(wTextP('Form 1 - Table (A) Triage Trees & Trees Require Remedial Actions (' + formAView.length + ')', 'Heading2', {b:true}));
+  blocks.push(wGrid(formAH, formAView.map(t => [t.no, t.zone, t.species, t.dbh, t.ht, t.spread, t.status, t.condition, t.triage, t.rec, t.date]), formAW));
+  blocks.push(wTextP('Sub-total No. of Trees in Table (A): ' + formAView.length));
+  const formBH = ['Tree Species 樹種', 'App. Quantity of Trees', 'Height From (m)', 'To (m)', 'Overall Conditions'];
+  const formBW = [2800, 1800, 1600, 1400, 2000];
+  const formBView = rep.formBView || formBGroups(rep.formB || []);
+  blocks.push(wTextP('Form 1 - Table (B) Other Trees (' + (rep.formB || []).length + ')', 'Heading2', {b:true}));
+  if (formBView.length) {
+    blocks.push(wGrid(formBH, formBView.map(g => [g.species, String(g.n), String(g.from), String(g.to), g.condition]), formBW));
+    blocks.push(wTextP('Sub-total No. of Trees in Table (B): ' + (rep.formB || []).length));
+  } else blocks.push(wTextP('No other trees.'));
+  return packDocx(blocks);
+}
+function xAuto(c, style) {
+  if (c && typeof c === 'object' && 'v' in c) return c;
+  if (typeof c === 'number' && Number.isFinite(c)) return {v: c, s: style ?? 4, t: 'n'};
+  const t = s(c);
+  if (t && /^-?\d+(\.\d+)?$/.test(t)) return {v: Number(t), s: style ?? 4, t: 'n'};
+  return {v: t, s: style ?? 4, t: 's'};
+}
+function xSimpleTable(headers, rows) {
+  const out = [headers.map(h => ({v: h, s: 3, t: 's'}))];
+  rows.forEach(row => out.push(row.map(c => xAuto(c, 4))));
+  return out;
+}
+function packXlsx(sheets) {
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <fonts count="3">
@@ -693,6 +897,80 @@ function buildXlsx(rep) {
   ];
   sheets.forEach((sh, i) => files.push({name: `xl/worksheets/sheet${i + 1}.xml`, data: sh.xml}));
   return zipStore(files);
+}
+function buildPrivateXlsx(rep) {
+  const s5 = [];
+  s5.push([{v: 'Section 5', s: 2, t: 's'}]);
+  s5.push([{v: 'Tree Survey Findings', s: 2, t: 's'}]);
+  s5.push([]);
+  String(rep.section5Intro || '').split('\n').forEach(line => s5.push([{v: line, s: 0, t: 's'}]));
+  s5.push([]);
+  s5.push(...xTableRows('', rep.species, rep.total));
+  s5.push([]);
+  s5.push([{v: 'TRIAGE colour summary', s: 2, t: 's'}]);
+  s5.push(...xSimpleTable(['Colour', 'No. of trees', 'Tree No.'], (rep.triageRows || []).map(x => [x.colour, x.n, x.nos])));
+  const s6 = [];
+  s6.push([{v: 'Section 6', s: 2, t: 's'}]);
+  s6.push([{v: 'Tree Risk Assessment Findings', s: 2, t: 's'}]);
+  s6.push([]);
+  String(rep.section6Intro || '').split('\n').forEach(line => s6.push([{v: line, s: 0, t: 's'}]));
+  s6.push([]);
+  s6.push([{v: 'Summary of tree numbers by recommendation', s: 2, t: 's'}]);
+  s6.push(...xSimpleTable(['Recommendation', 'No. of trees', 'Tree No.'], (rep.recSummary || []).map(x => [x.label, x.n, x.nos])));
+  s6.push([]);
+  s6.push([{v: 'Table 1. The summary of tree amounts with proposed mitigation measures', s: 2, t: 's'}]);
+  s6.push(...xSimpleTable(['Recommendations', 'No. of trees'], (rep.recTable1 || []).map(x => [x.label, x.n])));
+  s6.push([]);
+  s6.push([{v: 'Table 2. Detailed mitigation measures', s: 2, t: 's'}]);
+  for (const d of (rep.recDetails || [])) {
+    s6.push([{v: d.label, s: 2, t: 's'}]);
+    s6.push([{v: d.nos, s: 0, t: 's'}]);
+  }
+  const formAView = rep.formAView || formARows(rep.formA || []);
+  const formBView = rep.formBView || formBGroups(rep.formB || []);
+  const sA = [];
+  sA.push([{v: 'Form 1 - Table (A) Triage Trees & Trees Require Remedial Actions', s: 2, t: 's'}]);
+  sA.push([]);
+  sA.push([]);
+  sA.push(...xSimpleTable(
+    ['Dept. Tree ID', 'Zone', 'Tree Species (Scientific + Chinese)', 'DBH (mm)', 'Est. Height (m)', 'Est. Crown Spread (m)', 'Tree Status', 'Overall Tree Conditions', 'Triage Colour', 'Remedial Action', 'Anticipated Completion Date'],
+    formAView.map(t => [t.no, t.zone, t.species, t.dbh, t.ht, t.spread, t.status, t.condition, t.triage, t.rec, t.date])
+  ));
+  sA.push([]);
+  sA.push([{v: 'Sub-total No. of Trees in Table (A): ' + formAView.length, s: 2, t: 's'}]);
+  const sB = [];
+  sB.push([{v: 'Form 1 - Table (B) Other Trees', s: 2, t: 's'}]);
+  sB.push([]);
+  sB.push([]);
+  sB.push(...xSimpleTable(
+    ['Tree Species 樹種', 'App. Quantity of Trees', 'Height From (m)', 'To (m)', 'Overall Conditions'],
+    formBView.map(g => [g.species, g.n, g.from, g.to, g.condition])
+  ));
+  sB.push([]);
+  sB.push([{v: 'Sub-total No. of Trees in Table (B): ' + (rep.formB || []).length, s: 2, t: 's'}]);
+  return packXlsx([
+    xSheet('Section 5', s5, 4, [10, 42, 28, 16]),
+    xSheet('Section 6', s6, 3, [42, 16, 60]),
+    xSheet('Form 1 A', sA, 11, [18, 8, 36, 10, 14, 16, 18, 22, 14, 32, 18]),
+    xSheet('Form 1 B', sB, 5, [36, 22, 16, 12, 20])
+  ]);
+}
+function buildXlsx(rep) {
+  if (rep.mode === 'private') return buildPrivateXlsx(rep);
+  const speciesRows = xTableRows('', rep.species, rep.total);
+  const s4rows = String(rep.section4Body).split('\n').map(line => [{v: line, s: 0, t: 's'}]);
+  const tgRows = [];
+  for (const g of rep.groupBlocks) {
+    if (tgRows.length) tgRows.push([]);
+    if (g.rows.length) tgRows.push(...xTableRows(g.title, g.rows, g.total));
+    else { tgRows.push([{v: g.title, s: 2, t: 's'}]); tgRows.push([{v: 'No tree was found in this Tree Group.', s: 0, t: 's'}]); }
+  }
+  const sheets = [
+    xSheet('3.3 Species', speciesRows, 4),
+    xSheet('Section 4', [[{v: 'SECTION 4', s: 2, t: 's'}], [{v: 'CONCLUSION', s: 2, t: 's'}], [], ...s4rows], 1),
+    xSheet('Tree Groups', tgRows.length ? tgRows : [[{v: 'No tree group', s: 0, t: 's'}]], 4)
+  ];
+  return packXlsx(sheets);
 }
 function exportWord(rep) {
   downloadBytes(buildDocx(rep), exportBasename(rep.project) + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
@@ -760,12 +1038,14 @@ function run(file) {
       ht: find('height'),
       sp: find('spread','crown'),
       health: find('health'),
-      struct: find('structural'),
+      struct: find('structural','structure'),
       triage: find('triage'),
       rem: findSkip(['remark'], ['remarks*', 'suitability']),
       rec: find('mitigation','recommend','proposed'),
       zone: find('tree group') >= 0 ? find('tree group') : find('zone'),
       source: find('tprp/new','tprp','newly found','new found'),
+      complete: find('completion','anticipated','預計完成'),
+      status: find('tree status','樹木類別'),
     };
     const dataStart = h2.some(v => /scientific|chinese|dbh/.test(v)) ? hr+2 : hr+1;
     const deadAs = document.querySelector('input[name=dead]:checked').value;
@@ -790,7 +1070,8 @@ function run(file) {
       else if (/dead tree|^dead$/i.test(remarks + ' ' + sci)) { sci = 'Dead tree'; chi = '死樹'; }
       trees.push({ no, sci, chi, dbh: s(r[c.dbh]), ht: s(r[c.ht]), spread: s(r[c.sp]),
         health: s(r[c.health]), struct: s(r[c.struct]), triage: s(r[c.triage]),
-        remarks, rec, zone: s(r[c.zone]), source: s(r[c.source]) });
+        remarks, rec, zone: s(r[c.zone]), source: s(r[c.source]),
+        complete: c.complete >= 0 ? r[c.complete] : '', status: c.status >= 0 ? s(r[c.status]) : '' });
     }
     const remarkMismatches = collectRemarkMismatches(trees);
     const dropped = /duplicate|not in use|out of lot|outside|boundary/i;
@@ -813,7 +1094,19 @@ function run(file) {
     const removal = active.filter(t => REM.test(t.rec));
     const monitor = active.filter(t => /keep monitoring|monitoring/i.test(t.rec));
     const pest = active.filter(t => /pest control|mistletoe/i.test(t.rec));
-    const others = active.filter(t => t.rec && !/^(n\.?a\.?|-|)$/i.test(t.rec) && !PRUNE.test(t.rec) && !REM.test(t.rec) && !/keep monitoring|monitoring|pest control|mistletoe/i.test(t.rec));
+    const others = active.filter(t => t.rec && !/^(n\.?a\.?|-|)$/i.test(t.rec) && !PRUNE.test(t.rec) && !REM.test(t.rec) && !/keep monitoring|monitoring|pest control|mistletoe|re-inspection/i.test(t.rec));
+    const otherGroups = [];
+    {
+      const map = {};
+      others.forEach(t => {
+        const k = s(t.rec);
+        if (!map[k]) map[k] = [];
+        map[k].push(t);
+      });
+      Object.keys(map).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())).forEach(k => {
+        otherGroups.push({label: k, n: map[k].length, nos: joinNos(map[k]), trees: map[k]});
+      });
+    }
     const pruneIds = [...new Set(prune.map(t => t.no))];
     const monitorIds = monitor.map(t => t.no);
     const pestIds = pest.map(t => t.no);
@@ -870,7 +1163,44 @@ ${totalLine}`;
         return list.length ? { title: `${title} (${list.length} nos.)`, rows: speciesBreakdown(list), total: list.length } : null;
       }).filter(Boolean)
     ];
-    const reportData = { project, section33Intro, section4Body, species: speciesOrdered, total: active.length, groupBlocks };
+    const monthYear = new Date().toLocaleString('en',{month:'long',year:'numeric'});
+    const otherPhrase = !otherGroups.length ? ''
+      : otherGroups.length === 1 ? `, and ${otherGroups[0].n} for ${otherGroups[0].label}`
+      : `, and ${others.length} for other mitigation measures (${otherGroups.map(g => g.label).join('; ')})`;
+    const section5Intro = `A total of ${active.length} trees and ${spRows.length} species were recorded. The dominant species is ${domSci}${domRest ? ' ' + domRest : ''}.`;
+    const section6Intro = `A total of ${prune.length} trees were recommended for pruning, ${removal.length} number were recommended for tree removal, ${monitor.length} for keep monitoring, ${pest.length} for pest control${otherPhrase}. (See Table 1). The proposed mitigations for specific trees are summarised in the table (See Table 2). For details, please refer to Section 7 – Appendix D (Tree inventory).`;
+    const triageRows = [
+      {colour: 'Black', n: blk.length, nos: joinNos(blk)},
+      {colour: 'Red', n: reds.length, nos: joinNos(reds)},
+      {colour: 'Orange', n: o.length, nos: joinNos(o)},
+      {colour: 'Yellow', n: y.length, nos: joinNos(y)}
+    ];
+    const recSummary = [
+      {label: 'Pruning (unique, no duplicate tree no.)', n: pruneIds.length, nos: joinNos(pruneIds)},
+      {label: 'Tree removal', n: removalIds.length, nos: joinNos(removalIds)},
+      {label: 'Re-inspection', n: reinspect.length, nos: joinNos(reinspect)},
+      {label: 'Keep monitoring', n: monitorIds.length, nos: joinNos(monitorIds)},
+      {label: 'Pest control / mistletoe', n: pestIds.length, nos: joinNos(pestIds)},
+      ...otherGroups.map(g => ({label: g.label, n: g.n, nos: g.nos}))
+    ];
+    const recTable1 = [
+      {label: 'Tree pruning', n: prune.length},
+      {label: 'Tree removal', n: removal.length},
+      {label: 'Keep monitoring', n: monitor.length},
+      {label: 'Pest control / mistletoe', n: pest.length},
+      ...otherGroups.map(g => ({label: g.label, n: g.n}))
+    ];
+    const recDetails = [
+      {label: 'Tree pruning', nos: joinNos(pruneIds)},
+      {label: 'Tree removal', nos: joinNos(removalIds)},
+      {label: 'Re-inspection', nos: joinNos(reinspect)},
+      {label: 'Keep monitoring', nos: joinNos(monitorIds)},
+      {label: 'Pest control / mistletoe', nos: joinNos(pestIds)},
+      ...otherGroups.map(g => ({label: g.label, nos: g.nos}))
+    ];
+    const formAView = formARows(formA);
+    const formBView = formBGroups(formB);
+    const reportData = { mode, project, monthYear, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView };
     const tgSummaryHtml = groupBlocks.map(g =>
       `<h3>${esc(g.title)}</h3>` + (g.rows.length ? speciesTableHtml(g.rows, g.total) : '<p>No tree was found in this Tree Group.</p>')
     ).join('');
@@ -890,7 +1220,6 @@ ${totalLine}`;
       </div>
     ` : '';
 
-    const monthYear = new Date().toLocaleString('en',{month:'long',year:'numeric'});
     const speciesWarn = speciesRemarkDead.length ? `
       <div class="warn noprint">
         <h3>請核對：${speciesRemarkDead.length} 棵樹的 Tree species 不是 Dead tree，但 Remarks 寫了 Dead tree</h3>
@@ -902,13 +1231,18 @@ ${totalLine}`;
     const remarkWarn = remarkMismatches.length ? `
       <div class="warn noprint">
         <h3>請核對：${remarkMismatches.length} 項 Remarks 類似但不是缺陷表的標準 description</h3>
-        <table><tr><th>Remarks 用字</th><th>棵數</th><th>Tree No.</th><th>最接近的表內 description</th></tr>
-        ${remarkMismatches.map(r => `<tr><td>${esc(r.item)}</td><td>${r.nos.length}</td><td>${ids(r.nos)}</td><td>${r.official ? esc(r.official) : '（表內沒有相近項）'}${r.type === 'none' && r.official ? '（僅供參考）' : ''}</td></tr>`).join('')}
+        <table><tr><th>Remarks 用字</th><th>棵數</th><th>Tree No.</th></tr>
+        ${remarkMismatches.map(r => `<tr><td>${esc(r.item)}</td><td>${r.nos.length}</td><td>${ids(r.nos)}</td></tr>`).join('')}
         </table>
-        <p>完全符合表內用字的項目不會列出。請把相近用字改成標準 description，或確認該項是否應加入缺陷表。</p>
+        <p>完全符合表內用字的項目不會列出。</p>
       </div>` : '';
     const warnBox = speciesWarn + remarkWarn;
     const privateBody = `
+      <p class="noprint">
+        <button type="button" id="btnWord">匯出 Word</button>
+        <button type="button" id="btnExcel">匯出 Excel</button>
+      </p>
+      <div id="report">
       <h2>Section 5<br>Tree Survey Findings</h2>
       <p>A total of ${active.length} trees and ${spRows.length} species were recorded. The dominant species is <span class="sci">${esc(domSci)}</span> ${esc(domRest)}.</p>
       <table><tr><th>Tree Species</th><th>Quantity</th></tr>
@@ -919,7 +1253,7 @@ ${totalLine}`;
       ${[['Black',blk],['Red',reds],['Orange',o],['Yellow',y]].map(([c,a]) => `<tr><td>${c}</td><td>${a.length}</td><td>${ids(a)}</td></tr>`).join('')}
       </table>
       <h2>Section 6<br>Tree Risk Assessment Findings</h2>
-      <p>A total of ${prune.length} trees were recommended for pruning, ${removal.length} number were recommended for tree removal, ${monitor.length} for keep monitoring, ${pest.length} for pest control, and ${others.length} for other mitigation measures. (See Table 1). The proposed mitigations for specific trees are summarised in the table (See Table 2). For details, please refer to Section 7 – Appendix D (Tree inventory).</p>
+      <p>${section6Intro}</p>
       <p>Summary of tree numbers by recommendation</p>
       <table><tr><th>Recommendation</th><th>No. of trees</th><th>Tree No.</th></tr>
       <tr><td>Pruning (unique, no duplicate tree no.)</td><td>${pruneIds.length}</td><td>${ids(pruneIds)}</td></tr>
@@ -927,6 +1261,7 @@ ${totalLine}`;
       <tr><td>Re-inspection</td><td>${reinspect.length}</td><td>${ids(reinspect)}</td></tr>
       <tr><td>Keep monitoring</td><td>${monitorIds.length}</td><td>${ids(monitorIds)}</td></tr>
       <tr><td>Pest control / mistletoe</td><td>${pestIds.length}</td><td>${ids(pestIds)}</td></tr>
+      ${otherGroups.map(g => `<tr><td>${esc(g.label)}</td><td>${g.n}</td><td>${ids(g.trees)}</td></tr>`).join('')}
       </table>
       <p>Table 1. The summary of tree amounts with proposed mitigation measures</p>
       <table><tr><th>Recommendations</th><th>No. of trees</th></tr>
@@ -934,7 +1269,7 @@ ${totalLine}`;
       <tr><td>Tree removal</td><td>${removal.length}</td></tr>
       <tr><td>Keep monitoring</td><td>${monitor.length}</td></tr>
       <tr><td>Pest control / mistletoe</td><td>${pest.length}</td></tr>
-      <tr><td>Other mitigation measures</td><td>${others.length}</td></tr>
+      ${otherGroups.map(g => `<tr><td>${esc(g.label)}</td><td>${g.n}</td></tr>`).join('')}
       </table>
       <p>Table 2. Detailed mitigation measures</p>
       <p>Tree pruning:<br>${ids(pruneIds)}</p>
@@ -942,13 +1277,19 @@ ${totalLine}`;
       <p>Re-inspection:<br>${ids(reinspect)}</p>
       <p>Keep monitoring:<br>${ids(monitorIds)}</p>
       <p>Pest control / mistletoe:<br>${ids(pestIds)}</p>
-      <p>Other mitigation measures:<br>${ids(others)}</p>
-      <h2>Form 1 Table (A) — Triage / Remedial (${formA.length})</h2>
-      <table><tr><th>Tree No</th><th>Species</th><th>DBH</th><th>Height</th><th>Triage</th><th>Remedial</th></tr>
-      ${formA.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}${isRemoved(t.remarks) ? ' (Removed)' : ''}</td><td>${esc(t.dbh)}</td><td>${esc(t.ht)}</td><td>${esc(t.triage)}</td><td>${esc(t.rec)}</td></tr>`).join('')}
+      ${otherGroups.map(g => `<p>${esc(g.label)}:<br>${ids(g.trees)}</p>`).join('')}
+      <h2>Form 1 - Table (A) Triage Trees & Trees Require Remedial Actions (${formA.length})</h2>
+      <table><tr><th>Dept. Tree ID</th><th>Zone</th><th>Tree Species (Scientific + Chinese)</th><th>DBH (mm)</th><th>Est. Height (m)</th><th>Est. Crown Spread (m)</th><th>Tree Status</th><th>Overall Tree Conditions</th><th>Triage Colour</th><th>Remedial Action</th><th>Anticipated Completion Date</th></tr>
+      ${formAView.map(t => `<tr><td>${esc(t.no)}</td><td>${esc(t.zone)}</td><td><span class="sci">${esc(t.sci)}</span>${esc(t.chi)}</td><td>${esc(t.dbh)}</td><td>${esc(t.ht)}</td><td>${esc(t.spread)}</td><td>${esc(t.status)}</td><td>${esc(t.condition)}</td><td>${esc(t.triage)}</td><td>${esc(t.rec)}</td><td>${esc(t.date)}</td></tr>`).join('')}
+      <tr><td colspan="11">Sub-total No. of Trees in Table (A): ${formA.length}</td></tr>
       </table>
-      <h2>Form 1 Table (B) — Other trees (${formB.length})</h2>
+      <h2>Form 1 - Table (B) Other Trees (${formB.length})</h2>
+      <table><tr><th>Tree Species 樹種</th><th>App. Quantity of Trees</th><th>Height From (m)</th><th>To (m)</th><th>Overall Conditions</th></tr>
+      ${formBView.map(g => `<tr><td><span class="sci">${esc(g.sci)}</span>${esc(g.chi)}</td><td>${g.n}</td><td>${g.from}</td><td>${g.to}</td><td>${esc(g.condition)}</td></tr>`).join('')}
+      <tr><td colspan="5">Sub-total No. of Trees in Table (B): ${formB.length}</td></tr>
+      </table>
       <p class="note">品種摘要見 Section 5。有效總數 ${active.length}（已排除 Removed）。TPRP ${tprpN}／新發現 ${newN}。工作表：${esc(usedSheet)}</p>
+      </div>
     `;
     document.getElementById('out').innerHTML = `
       ${warnBox}
