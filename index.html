@@ -300,12 +300,13 @@ function collectRemarkMismatches(trees) {
   for (const t of trees) {
     for (const item of splitRemarks(t.remarks)) {
       const m = bestDefect(item);
-      if (m.type === 'exact') continue;
-      if (!map.has(item)) map.set(item, { item, nos: [] });
+      if (!map.has(item)) map.set(item, { item, nos: [], type: m.type });
       map.get(item).nos.push(t.no);
     }
   }
-  return [...map.values()].sort((a, b) => b.nos.length - a.nos.length || a.item.localeCompare(b.item));
+  const order = { similar: 0, none: 1, exact: 2 };
+  return [...map.values()].map(r => ({ ...r, nos: sortTreeNos(r.nos) }))
+    .sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9) || b.nos.length - a.nos.length || a.item.localeCompare(b.item));
 }
 
 function sortTreeNos(nos) {
@@ -1318,13 +1319,14 @@ ${totalLine}`;
         </table>` : ''}
         <p>報告仍按 Schedule 的用字分開統計；請在 Schedule 統一名稱。</p>
       </div>` : '';
+    const remarkNonstandard = remarkMismatches.filter(r => r.type !== 'exact').length;
     const remarkWarn = remarkMismatches.length ? `
       <div class="warn noprint">
-        <h3>請核對：${remarkMismatches.length} 項 Remarks 類似但不是缺陷表的標準 description</h3>
+        <h3>全部 Remarks（${remarkMismatches.length} 項用字${remarkNonstandard ? '，其中 ' + remarkNonstandard + ' 項不是標準 description' : ''}）</h3>
         <table><tr><th>Remarks 用字</th><th>棵數</th><th>Tree No.</th></tr>
         ${remarkMismatches.map(r => `<tr><td>${esc(r.item)}</td><td>${r.nos.length}</td><td>${ids(r.nos)}</td></tr>`).join('')}
         </table>
-        <p>完全符合表內用字的項目不會列出。</p>
+        <p>已列出 Schedule 內所有 Remarks 用字（N.A. 除外）；符合標準的項目一併列出。</p>
       </div>` : '';
     const warnBox = speciesWarn + nameWarn + remarkWarn;
     const privateBody = `
