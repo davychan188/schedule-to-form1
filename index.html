@@ -60,7 +60,7 @@ document.querySelectorAll('input[name=dead], input[name=mode]').forEach(el => {
   document.getElementById(id).addEventListener('change', () => { if (lastFile) run(lastFile); });
 });
 
-const s = v => String(v ?? '').trim();
+const s = v => String(v ?? '').replace(/[\u00a0\u200b\u200c\u200d\ufeff\u3000]/g, ' ').replace(/\s+/g, ' ').trim();
 const esc = v => s(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const looks = v => {
   const t = s(v).replace(/\s+/g,'');
@@ -766,6 +766,7 @@ function run(file) {
     }
     const trees = [];
     const speciesRemarkDead = [];
+    const mode = document.querySelector('input[name=mode]:checked').value;
     for (let i = dataStart; i < raw.length; i++) {
       const r = raw[i] || [];
       const no = s(r[c.no]).replace(/\s+/g,'');
@@ -781,7 +782,8 @@ function run(file) {
         remarks, rec, zone: s(r[c.zone]), source: s(r[c.source]) });
     }
     const remarkMismatches = collectRemarkMismatches(trees);
-    const active = trees.filter(t => !isRemoved(t.remarks) && !/duplicate|not in use|out of lot|construction|outside|boundary/i.test(t.remarks + ' ' + t.rec));
+    const dropped = /duplicate|not in use|out of lot|outside|boundary/i;
+    const active = trees.filter(t => (mode === 'construction' || !isRemoved(t.remarks)) && !dropped.test(t.remarks + ' ' + t.rec));
     const species = {};
     active.forEach(t => {
       const k = t.sci + '|' + t.chi;
@@ -809,7 +811,6 @@ function run(file) {
     const formA = active.filter(t => /yellow|orange|red|black/i.test(t.triage) || (t.rec && !/^(n\.?a\.?|-|no mitigation)/i.test(t.rec)));
     const formB = active.filter(t => !formA.includes(t));
 
-    const mode = document.querySelector('input[name=mode]:checked').value;
     const allGroupSet = new Set();
     for (let i = dataStart; i < raw.length; i++) {
       const z = raw[i][c.zone];
