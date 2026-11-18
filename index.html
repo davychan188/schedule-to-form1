@@ -39,7 +39,7 @@
   <label><input type="radio" name="mode" value="private"> Private（不出 Section 4）</label>
   <button type="button" onclick="window.print()">列印 / 存 PDF</button>
 </div>
-<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。可把此頁連結分享給同事使用。</p>
+<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；用字相近但不是標準 description 的項目會列出。</p>
 <div id="out"></div>
 <script>
 const drop = document.getElementById('drop');
@@ -72,6 +72,240 @@ const remarkIsDeadTree = rem => {
   const t = s(rem);
   return /dead\s*trees?|死樹|枯樹/i.test(t) || /^dead\.?$/i.test(t);
 };
+const DEFECTS = [
+  "Abnormal bark crack on branch",
+  "Abnormal bark crack on trunk",
+  "Abnormal leaf size",
+  "Asymmetric crown",
+  "Bee hive",
+  "Bending",
+  "Bird nest",
+  "Borer Frass",
+  "Borer holes",
+  "Branch topped",
+  "Broken branch",
+  "Broken branches",
+  "Bulge",
+  "Burls",
+  "Canker",
+  "Cavity on branch",
+  "Cavity on roots",
+  "Cavity on trunk",
+  "Chlorotic leaves",
+  "Climbers",
+  "Collapsed",
+  "Co-dominant branches",
+  "Co-dominant branches with included bark",
+  "Co-dominant trunks",
+  "Co-dominant trunks with included bark",
+  "Conflict with building",
+  "Conflict with traffic",
+  "Crack",
+  "Crack on branch",
+  "Crack on root",
+  "Crooks",
+  "Cross branches",
+  "Cross trunks",
+  "Crown",
+  "Dead branch",
+  "Dead branch_close up",
+  "Dead branches",
+  "Dead frond",
+  "Dead fronds",
+  "Dead stub",
+  "Dead surface root",
+  "Dead tree",
+  "Dead trunk",
+  "Dead twigs",
+  "Decay on branch",
+  "Decay on roots",
+  "Decay on trunk",
+  "Dehydrated trunk",
+  "Dieback",
+  "Drooping branches",
+  "Epicormics",
+  "Epiphytic plant",
+  "Exposed dead wood on branch",
+  "Exposed dead wood on trunk",
+  "Exposed root",
+  "Fissures on branches",
+  "Fungal fruiting bodies on branch",
+  "Fungal fruiting bodies on root",
+  "Fungal fruiting bodies on trunk",
+  "Fungal fruiting bodies on trunk base",
+  "Fungal fruiting body on branch",
+  "Fungal fruiting body on root",
+  "Fungal fruiting body on trunk",
+  "Fungal fruiting body on trunk base",
+  "Fungi",
+  "Gall",
+  "Galls",
+  "Girdling roots",
+  "Hanger",
+  "Heavy lateral branch",
+  "Imbalanced crown",
+  "Included bark",
+  "Included bark with response growth",
+  "Invisible root flare",
+  "Leader broken",
+  "Leaning",
+  "Leaning due to phototropism",
+  "Leaning with self-correction",
+  "Leaning with staking",
+  "Leaning without root-plate movement",
+  "Lion tailing",
+  "Low live crown ratio",
+  "Main trunk broken",
+  "Mechanical injury",
+  "Minor dead branch",
+  "Minor dieback",
+  "Minor sap flow",
+  "Missing leader",
+  "Multiple trunks",
+  "Narrowing trunk",
+  "No hollow detected",
+  "Old termite track",
+  "On slope",
+  "Overgrown",
+  "Over-extending branch",
+  "Parasitic plant",
+  "Penciling",
+  "Poor health",
+  "Poor taper",
+  "Previous root-plate movement",
+  "Pruning wound on branch",
+  "Pruning wound on trunk",
+  "Reduced crown",
+  "Removed",
+  "Restricted root growth",
+  "Root",
+  "Root plate movement",
+  "Sap flow",
+  "Seasonal defoliation",
+  "Severely sparse foliage",
+  "Sign of borer",
+  "Sign of pest",
+  "Sign of pest infestation",
+  "Sign of Phauda flammans infestation",
+  "Slightly leaning",
+  "Small crown size",
+  "Sparse foliage",
+  "Spiral grain",
+  "Split",
+  "Split on branch",
+  "Split on root",
+  "Stump",
+  "Strangled by ficus seedling",
+  "Sunscald",
+  "Suspected BRRD",
+  "Suspected hollow by sounding test",
+  "Swelling",
+  "Tag",
+  "Tearing wound",
+  "Termite mud tubes",
+  "Termite track",
+  "Termite track live termite",
+  "Topped",
+  "Tree located at drainage channel embankment",
+  "Tree located near hoarding",
+  "Trunk",
+  "Trunk base",
+  "Trunk conflict with railing",
+  "Uprooted",
+  "V-shaped crotch with included bark",
+  "Whole view",
+  "Wilted apical bud",
+  "Wilted crown",
+  "Wilting",
+  "Wilting fronds",
+  "Within construction site",
+  "Wound on branch",
+  "Wound on roots",
+  "Wound on trunk",
+  "Wound on trunk union",
+  "Wound sealed by concrete"
+];
+const splitRemarks = rem => s(rem).split(/[,;，、]+/).map(x => x.replace(/\s+/g,' ').trim())
+  .filter(x => x && !/^(n\.?a\.?|nan|nil|none|-)$/i.test(x));
+const defectKey = t => s(t).replace(/\u00a0/g,' ').replace(/[_]+/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
+const compactKey = t => defectKey(t).replace(/[^a-z0-9\u4e00-\u9fff]+/g,'');
+const stemWord = w => {
+  const out = [w];
+  if (w.length > 4 && w.endsWith('s') && !/(ss|us|is)$/.test(w)) out.push(w.slice(0, -1));
+  if (w.length > 6 && w.endsWith('ing')) out.push(w.slice(0, -3));
+  if (w.length > 5 && w.endsWith('ed')) out.push(w.slice(0, -2));
+  return out;
+};
+const defectTokens = t => defectKey(t).replace(/[^a-z0-9\u4e00-\u9fff]+/g,' ').trim().split(/\s+/).filter(Boolean);
+const STOP = new Set(['on','of','at','with','by','the','a','an','and','due','to','in']);
+const DEFECT_EXACT = new Map(DEFECTS.map(d => [defectKey(d), d]));
+function levRatio(a, b) {
+  if (a === b) return 1;
+  const m = a.length, n = b.length;
+  if (!m || !n) return 0;
+  const dp = Array.from({length: m + 1}, (_, i) => {
+    const row = new Array(n + 1);
+    row[0] = i;
+    return row;
+  });
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return 1 - dp[m][n] / Math.max(m, n);
+}
+function tokenScore(a, b) {
+  const ta = defectTokens(a), tb = defectTokens(b);
+  if (!ta.length || !tb.length) return 0;
+  const expand = words => {
+    const set = new Set();
+    words.forEach(w => stemWord(w).forEach(x => set.add(x)));
+    return set;
+  };
+  const sa = expand(ta), sb = expand(tb);
+  let inter = 0;
+  for (const x of sa) if (sb.has(x)) inter++;
+  const union = sa.size + sb.size - inter;
+  const jac = union ? inter / union : 0;
+  const dice = (2 * inter) / (sa.size + sb.size);
+  const sortA = [...ta].map(w => stemWord(w)[0]).sort().join(' ');
+  const sortB = [...tb].map(w => stemWord(w)[0]).sort().join(' ');
+  const sortR = sortA === sortB ? 1 : levRatio(sortA, sortB);
+  const content = ta.filter(w => !STOP.has(w));
+  let contain = 0;
+  if (content.length && content.every(w => stemWord(w).some(x => sb.has(x)))) {
+    contain = 0.72 + 0.2 * (content.length / Math.max(tb.length, 1));
+  }
+  return Math.max(jac, dice, sortR, contain);
+}
+function bestDefect(item) {
+  const k = defectKey(item);
+  if (DEFECT_EXACT.has(k)) return { type: 'exact', official: DEFECT_EXACT.get(k), score: 1 };
+  let best = { official: '', score: 0 };
+  const ck = compactKey(item);
+  for (const d of DEFECTS) {
+    const score = Math.max(tokenScore(item, d), levRatio(ck, compactKey(d)));
+    if (score > best.score) best = { official: d, score };
+  }
+  if (best.score >= 0.62) return { type: 'similar', official: best.official, score: best.score };
+  return { type: 'none', official: best.score >= 0.5 ? best.official : '', score: best.score };
+}
+function collectRemarkMismatches(trees) {
+  const map = new Map();
+  for (const t of trees) {
+    for (const item of splitRemarks(t.remarks)) {
+      const m = bestDefect(item);
+      if (m.type === 'exact') continue;
+      const key = item + '\0' + m.type + '\0' + m.official;
+      if (!map.has(key)) map.set(key, { item, type: m.type, official: m.official, nos: [] });
+      map.get(key).nos.push(t.no);
+    }
+  }
+  const rank = typ => typ === 'similar' ? 0 : 1;
+  return [...map.values()].sort((a, b) => rank(a.type) - rank(b.type) || b.nos.length - a.nos.length || a.item.localeCompare(b.item));
+}
 const ids = list => list.map(t => typeof t === 'string' ? esc(t) : esc(t.no)).join(', ') || '/';
 const isTG = v => {
   const t = s(v).replace(/\s+/g,'');
@@ -184,6 +418,7 @@ function run(file) {
         health: s(r[c.health]), struct: s(r[c.struct]), triage: s(r[c.triage]),
         remarks, rec, zone: s(r[c.zone]), source: s(r[c.source]) });
     }
+    const remarkMismatches = collectRemarkMismatches(trees);
     const active = trees.filter(t => !isRemoved(t.remarks) && !/duplicate|not in use|out of lot|construction|outside|boundary/i.test(t.remarks + ' ' + t.rec));
     const species = {};
     active.forEach(t => {
@@ -252,7 +487,7 @@ ${aliveN} (Alive) + ${deadN} (Dead Trees) = ${active.length}`;
     ` : '';
 
     const monthYear = new Date().toLocaleString('en',{month:'long',year:'numeric'});
-    const warnBox = speciesRemarkDead.length ? `
+    const speciesWarn = speciesRemarkDead.length ? `
       <div class="warn noprint">
         <h3>請核對：${speciesRemarkDead.length} 棵樹的 Tree species 不是 Dead tree，但 Remarks 寫了 Dead tree</h3>
         <table><tr><th>Tree No</th><th>Tree species</th><th>Remarks</th></tr>
@@ -260,6 +495,15 @@ ${aliveN} (Alive) + ${deadN} (Dead Trees) = ${active.length}`;
         </table>
         <p>報告仍會按 Dead tree 處理這些樹；請在 Schedule 更正品種或備註。</p>
       </div>` : '';
+    const remarkWarn = remarkMismatches.length ? `
+      <div class="warn noprint">
+        <h3>請核對：${remarkMismatches.length} 項 Remarks 類似但不是缺陷表的標準 description</h3>
+        <table><tr><th>Remarks 用字</th><th>棵數</th><th>Tree No.</th><th>最接近的表內 description</th></tr>
+        ${remarkMismatches.map(r => `<tr><td>${esc(r.item)}</td><td>${r.nos.length}</td><td>${ids(r.nos)}</td><td>${r.official ? esc(r.official) : '（表內沒有相近項）'}${r.type === 'none' && r.official ? '（僅供參考）' : ''}</td></tr>`).join('')}
+        </table>
+        <p>完全符合表內用字的項目不會列出。請把相近用字改成標準 description，或確認該項是否應加入缺陷表。</p>
+      </div>` : '';
+    const warnBox = speciesWarn + remarkWarn;
     document.getElementById('out').innerHTML = `
       ${warnBox}
       <h1>Tree Risk Assessment Report</h1>
