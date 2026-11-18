@@ -20,8 +20,11 @@
   .opts label { font-size: 14px; }
   .opts input[type="text"] { font-family: inherit; font-size: 14px; padding: 4px 8px; min-width: 280px; }
   .opts button { font-family: inherit; font-size: 14px; padding: 6px 12px; cursor: pointer; }
-  #s4text { width: 100%; height: 380px; font-family: inherit; font-size: 14px; padding: 10px; user-select: text; cursor: text; box-sizing: border-box; }
   h3 { font-size: 15px; margin-top: 22px; }
+  #report { font-family: "Times New Roman", "PMingLiU", serif; }
+  #report table { width: auto; min-width: 70%; font-size: 12pt; }
+  #report th, #report td { border: 1px solid #000; padding: 4px 8px; }
+  #report th { background: #fff; color: #000; font-weight: bold; text-align: center; }
   .warn { background: #fff6e5; border: 1px solid #c47b00; color: #5c3a00; padding: 12px 14px; margin: 0 0 18px; border-radius: 8px; font-family: Arial, sans-serif; font-size: 14px; }
   .warn h3 { margin: 0 0 8px; font-size: 15px; color: #8a4b00; }
   .warn table th { background: #c47b00; }
@@ -38,7 +41,6 @@
   <label><input type="radio" name="dead" value="Dead tree"> Dead tree → Dead tree</label>
   <label><input type="radio" name="mode" value="construction" checked> Construction（3.3 及 Section 4）</label>
   <label><input type="radio" name="mode" value="private"> Private（不出 Section 4）</label>
-  <button type="button" onclick="window.print()">列印 / 存 PDF</button>
 </div>
 <p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；用字相近但不是標準 description 的項目會列出。</p>
 <div id="out"></div>
@@ -362,10 +364,330 @@ function speciesBreakdown(list) {
   const dead = rows.filter(x => isDeadSpecies(x.sci, x.chi));
   return [...live, ...dead];
 }
-function speciesTableHtml(rows, total, withNos) {
-  return `<table><tr><th></th><th>Scientific Name</th><th>Chinese Name</th><th>Quantity</th>${withNos ? '<th>Tree No.</th>' : ''}</tr>
-      ${rows.map((x, i) => `<tr><td>${i + 1}</td><td><span class="sci">${esc(x.sci)}</span></td><td>${esc(x.chi)}</td><td>${x.n}</td>${withNos ? `<td>${ids(x.nos)}</td>` : ''}</tr>`).join('')}
-      <tr><td colspan="3">Total</td><td>${total}</td>${withNos ? '<td></td>' : ''}</tr></table>`;
+function isItalicSci(sci, chi) {
+  return !isDeadSpecies(sci, chi);
+}
+function sciHtml(sci, chi) {
+  const t = esc(sci);
+  return isItalicSci(sci, chi) ? `<i>${t}</i>` : t;
+}
+function speciesTableHtml(rows, total) {
+  return `<table>
+      <tr><th></th><th>Scientific Name</th><th>Chinese Name</th><th>Quantity</th></tr>
+      ${rows.map((x, i) => `<tr><td>${i + 1}</td><td>${sciHtml(x.sci, x.chi)}</td><td>${esc(x.chi)}</td><td>${x.n}</td></tr>`).join('')}
+      <tr><td>Total</td><td></td><td></td><td>${total}</td></tr></table>`;
+}
+function xmlEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+}
+function strToU8(s) { return new TextEncoder().encode(s); }
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files) {
+  const chunks = [], central = [];
+  let offset = 0;
+  for (const {name, data} of files) {
+    const n = strToU8(name);
+    const d = typeof data === 'string' ? strToU8(data) : data;
+    const crc = crc32(d);
+    const loc = new Uint8Array(30 + n.length);
+    const v = new DataView(loc.buffer);
+    v.setUint32(0, 0x04034b50, true);
+    v.setUint16(4, 20, true);
+    v.setUint16(6, 0x0800, true);
+    v.setUint32(14, crc, true);
+    v.setUint32(18, d.length, true);
+    v.setUint32(22, d.length, true);
+    v.setUint16(26, n.length, true);
+    loc.set(n, 30);
+    chunks.push(loc, d);
+    const cen = new Uint8Array(46 + n.length);
+    const cv = new DataView(cen.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, d.length, true);
+    cv.setUint32(24, d.length, true);
+    cv.setUint16(28, n.length, true);
+    cv.setUint32(42, offset, true);
+    cen.set(n, 46);
+    central.push(cen);
+    offset += loc.length + d.length;
+  }
+  let cenSize = 0;
+  central.forEach(c => { cenSize += c.length; });
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cenSize, true);
+  ev.setUint32(16, offset, true);
+  const parts = [...chunks, ...central, eocd];
+  let total = 0;
+  parts.forEach(p => { total += p.length; });
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+function downloadBytes(bytes, filename, mime) {
+  const blob = new Blob([bytes], { type: mime });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+}
+function exportBasename(project) {
+  const base = s(project || 'Tree_Survey_Report').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return (base || 'Tree_Survey_Report').slice(0, 80);
+}
+
+function wRun(text, opts) {
+  const p = [];
+  if (opts && (opts.i || opts.b)) {
+    p.push('<w:rPr>');
+    if (opts.b) p.push('<w:b/><w:bCs/>');
+    if (opts.i) p.push('<w:i/><w:iCs/>');
+    p.push('</w:rPr>');
+  }
+  return `<w:r>${p.join('')}<w:t xml:space="preserve">${xmlEsc(text)}</w:t></w:r>`;
+}
+function wP(inner, style) {
+  return `<w:p>${style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : ''}${inner || ''}</w:p>`;
+}
+function wTextP(text, style, opts) {
+  return String(text).split('\n').map(line => wP(wRun(line, opts), style)).join('');
+}
+function wCell(inner, width) {
+  return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/></w:tcPr>${inner || wP('')}</w:tc>`;
+}
+function wTable(rows, total) {
+  const widths = [800, 3600, 2800, 1200];
+  const b = n => `<w:${n} w:val="single" w:sz="4" w:space="0" w:color="000000"/>`;
+  const borders = `<w:tblBorders>${b('top')}${b('left')}${b('bottom')}${b('right')}${b('insideH')}${b('insideV')}</w:tblBorders>`;
+  const grid = `<w:tblGrid>${widths.map(w => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`;
+  const cell = (i, inner) => wCell(wP(inner), widths[i]);
+  const header = ['', 'Scientific Name', 'Chinese Name', 'Quantity'];
+  const headerRow = `<w:tr>${header.map((h, i) => cell(i, wRun(h, {b:true}))).join('')}</w:tr>`;
+  const body = rows.map((x, i) => `<w:tr>${
+    cell(0, wRun(String(i + 1))) +
+    cell(1, wRun(x.sci, {i: isItalicSci(x.sci, x.chi)})) +
+    cell(2, wRun(x.chi)) +
+    cell(3, wRun(String(x.n)))
+  }</w:tr>`).join('');
+  const totalRow = `<w:tr>${
+    cell(0, wRun('Total', {b:true})) + cell(1, wRun('')) + cell(2, wRun('')) + cell(3, wRun(String(total), {b:true}))
+  }</w:tr>`;
+  return `<w:tbl><w:tblPr><w:tblW w:w="8400" w:type="dxa"/>${borders}<w:tblLayout w:type="fixed"/></w:tblPr>${grid}${headerRow}${body}${totalRow}</w:tbl>${wP('')}`;
+}
+function buildDocx(rep) {
+  const blocks = [];
+  blocks.push(wTextP('3.3 Species and OVT in approved TPRP', 'Heading2', {b:true}));
+  blocks.push(wTextP(rep.section33Intro));
+  blocks.push(wTable(rep.species, rep.total));
+  blocks.push(wTextP('SECTION 4', 'Heading2', {b:true}));
+  blocks.push(wTextP('CONCLUSION', 'Heading2', {b:true}));
+  blocks.push(wTextP(rep.section4Body));
+  blocks.push(wTextP('Tree Group Summary', 'Heading2', {b:true}));
+  for (const g of rep.groupBlocks) {
+    blocks.push(wTextP(g.title, null, {b:true}));
+    if (g.rows.length) blocks.push(wTable(g.rows, g.total));
+    else blocks.push(wTextP('No tree was found in this Tree Group.'));
+  }
+  const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${blocks.join('')}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr></w:body></w:document>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults><w:rPrDefault><w:rPr>
+    <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="PMingLiU" w:cs="Times New Roman"/>
+    <w:sz w:val="24"/><w:szCs w:val="24"/>
+  </w:rPr></w:rPrDefault></w:docDefaults>
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/>
+    <w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr>
+    <w:rPr><w:b/><w:bCs/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr>
+  </w:style>
+</w:styles>`;
+  const ctypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+  const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+  return zipStore([
+    {name: '[Content_Types].xml', data: ctypes},
+    {name: '_rels/.rels', data: rels},
+    {name: 'word/_rels/document.xml.rels', data: docRels},
+    {name: 'word/document.xml', data: doc},
+    {name: 'word/styles.xml', data: styles}
+  ]);
+}
+
+function colLetter(n) {
+  let s = '';
+  n += 1;
+  while (n) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); }
+  return s;
+}
+function xCell(r, c, value, style, type) {
+  const ref = colLetter(c) + r;
+  if (type === 'n') return `<c r="${ref}" s="${style}" t="n"><v>${value}</v></c>`;
+  return `<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(value)}</t></is></c>`;
+}
+function xSheet(name, rows, cols) {
+  const maxR = rows.length;
+  const maxC = cols || 4;
+  const dim = `A1:${colLetter(maxC - 1)}${Math.max(maxR, 1)}`;
+  const sheetData = rows.map((row, i) => {
+    const r = i + 1;
+    const cells = row.map((cell, c) => {
+      if (!cell) return xCell(r, c, '', 4);
+      return xCell(r, c, cell.v, cell.s, cell.t);
+    }).join('');
+    return `<row r="${r}">${cells}</row>`;
+  }).join('');
+  return {name, xml: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="1" max="1" width="8" customWidth="1"/>
+    <col min="2" max="2" width="42" customWidth="1"/>
+    <col min="3" max="3" width="28" customWidth="1"/>
+    <col min="4" max="4" width="12" customWidth="1"/>
+  </cols>
+  <sheetData>${sheetData}</sheetData>
+  <dimension ref="${dim}"/>
+</worksheet>`};
+}
+function xTableRows(startTitle, rows, total) {
+  const out = [];
+  if (startTitle) out.push([{v: startTitle, s: 2, t: 's'}]);
+  out.push([
+    {v: '', s: 3, t: 's'},
+    {v: 'Scientific Name', s: 3, t: 's'},
+    {v: 'Chinese Name', s: 3, t: 's'},
+    {v: 'Quantity', s: 3, t: 's'}
+  ]);
+  rows.forEach((x, i) => {
+    out.push([
+      {v: i + 1, s: 4, t: 'n'},
+      {v: x.sci, s: isItalicSci(x.sci, x.chi) ? 5 : 4, t: 's'},
+      {v: x.chi, s: 4, t: 's'},
+      {v: x.n, s: 4, t: 'n'}
+    ]);
+  });
+  out.push([
+    {v: 'Total', s: 6, t: 's'},
+    {v: '', s: 6, t: 's'},
+    {v: '', s: 6, t: 's'},
+    {v: total, s: 6, t: 'n'}
+  ]);
+  return out;
+}
+function buildXlsx(rep) {
+  const speciesRows = xTableRows('', rep.species, rep.total);
+  const s4rows = String(rep.section4Body).split('\n').map(line => [{v: line, s: 0, t: 's'}]);
+  const tgRows = [];
+  for (const g of rep.groupBlocks) {
+    if (tgRows.length) tgRows.push([]);
+    if (g.rows.length) tgRows.push(...xTableRows(g.title, g.rows, g.total));
+    else { tgRows.push([{v: g.title, s: 2, t: 's'}]); tgRows.push([{v: 'No tree was found in this Tree Group.', s: 0, t: 's'}]); }
+  }
+  const sheets = [
+    xSheet('3.3 Species', speciesRows, 4),
+    xSheet('Section 4', [[{v: 'SECTION 4', s: 2, t: 's'}], [{v: 'CONCLUSION', s: 2, t: 's'}], [], ...s4rows], 1),
+    xSheet('Tree Groups', tgRows.length ? tgRows : [[{v: 'No tree group', s: 0, t: 's'}]], 4)
+  ];
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="3">
+    <font><sz val="11"/><name val="Times New Roman"/></font>
+    <font><sz val="11"/><name val="Times New Roman"/><i/></font>
+    <font><sz val="11"/><name val="Times New Roman"/><b/></font>
+  </fonts>
+  <fills count="2">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+  </fills>
+  <borders count="2">
+    <border/><border>
+      <left style="thin"/><right style="thin"/><top style="thin"/><bottom style="thin"/>
+    </border>
+  </borders>
+  <cellStyleXfs count="1"><xf/></cellStyleXfs>
+  <cellXfs count="7">
+    <xf fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf fontId="1" fillId="0" borderId="0" xfId="0"/>
+    <xf fontId="2" fillId="0" borderId="0" xfId="0"/>
+    <xf fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>
+    <xf fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>
+    <xf fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>
+    <xf fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>${sheets.map((sh, i) => `<sheet name="${xmlEsc(sh.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets>
+</workbook>`;
+  const wbRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${sheets.map((sh, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}
+  <Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+  const ctypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  ${sheets.map((sh, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}
+</Types>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+  const files = [
+    {name: '[Content_Types].xml', data: ctypes},
+    {name: '_rels/.rels', data: rels},
+    {name: 'xl/workbook.xml', data: workbook},
+    {name: 'xl/_rels/workbook.xml.rels', data: wbRels},
+    {name: 'xl/styles.xml', data: styles}
+  ];
+  sheets.forEach((sh, i) => files.push({name: `xl/worksheets/sheet${i + 1}.xml`, data: sh.xml}));
+  return zipStore(files);
+}
+function exportWord(rep) {
+  downloadBytes(buildDocx(rep), exportBasename(rep.project) + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+}
+function exportExcel(rep) {
+  downloadBytes(buildXlsx(rep), exportBasename(rep.project) + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 function detectProject(raw, hr) {
   const skip = /tree assessment schedule|initial tree survey|tree inventory|^nan$/i;
@@ -512,48 +834,39 @@ function run(file) {
     const projectPhrase = project ? ' at ' + project : '';
     const section33Intro = `A total of ${speciesLive.length} species were recorded during the survey and are represented throughout the survey area. No rare tree species, Registered Old and Valuable Trees (OVT), and Stonewall Trees were found during the inspection.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}
 Species composition of the survey area is summarized in the following table:`;
-    const speciesTablePlain = [
-      ['', 'Scientific Name', 'Chinese Name', 'Quantity'].join('\t'),
-      ...speciesOrdered.map((x, i) => [i + 1, x.sci, x.chi, x.n].join('\t')),
-      ['Total', '', '', active.length].join('\t')
-    ].join('\n');
     const included = includedPhrase(indN, grpN, newN);
     const section4Body = `A tree survey has been carried out within the respective Project Area${projectPhrase}, to record the number of trees, species name, trunk diameters, height, crown spread, tree form, health condition.
 Based on the site inspection conducted prior to the commencement of works, total of ${active.length} nos. of surveyed tree. ${included ? included + ' comprising ' + aliveN + ' alive trees and ' + deadN + ' dead trees. ' : 'Comprising ' + aliveN + ' alive trees and ' + deadN + ' dead trees. '}No rare or protected species as listed under Cap.96 and Cap.586 were recorded.
 Total Number of Trees Found On-Site:
 ${aliveN} (Alive) + ${deadN} (Dead Trees) = ${active.length}.`;
-    const section4Plain = `3.3 Species and OVT in approved TPRP
-${section33Intro}
-
-${speciesTablePlain}
-
-SECTION 4
-CONCLUSION
-
-${section4Body}`;
-    const tgSummaryHtml = groups.map(g => {
-      const list = active.filter(t => isTG(t.zone) && normTG(t.zone) === g);
-      const rows = speciesBreakdown(list);
-      return `<h3>${esc(g)} (${list.length} nos.)</h3>` +
-        (list.length ? speciesTableHtml(rows, list.length, true)
-          : '<p>No tree was found in this Tree Group.</p>');
-    }).join('');
-    const extraKindHtml = (kind, title) => {
-      const list = active.filter(t => classifyKind(t) === kind);
-      if (!list.length) return '';
-      return `<h3>${esc(title)} (${list.length} nos.)</h3>` + speciesTableHtml(speciesBreakdown(list), list.length, true);
-    };
+    const groupBlocks = [
+      ...groups.map(g => {
+        const list = active.filter(t => isTG(t.zone) && normTG(t.zone) === g);
+        return { title: `${g} (${list.length} nos.)`, rows: speciesBreakdown(list), total: list.length };
+      }),
+      ...[['INDIVIDUAL', 'Individual trees in TPRP'], ['NEW', 'Newly found trees']].map(([kind, title]) => {
+        const list = active.filter(t => classifyKind(t) === kind);
+        return list.length ? { title: `${title} (${list.length} nos.)`, rows: speciesBreakdown(list), total: list.length } : null;
+      }).filter(Boolean)
+    ];
+    const reportData = { project, section33Intro, section4Body, species: speciesOrdered, total: active.length, groupBlocks };
+    const tgSummaryHtml = groupBlocks.map(g =>
+      `<h3>${esc(g.title)}</h3>` + (g.rows.length ? speciesTableHtml(g.rows, g.total) : '<p>No tree was found in this Tree Group.</p>')
+    ).join('');
     const section4 = mode === 'construction' ? `
+      <p class="noprint">
+        <button type="button" id="btnWord">匯出 Word</button>
+        <button type="button" id="btnExcel">匯出 Excel</button>
+      </p>
+      <div id="report">
       <h2>3.3 Species and OVT in approved TPRP</h2>
       <p>${section33Intro.replace(/\n/g, '</p><p>')}</p>
-      ${speciesTableHtml(speciesOrdered, active.length, false)}
-      <h2>Section 4<br>Conclusion</h2>
-      <textarea id="s4text" readonly></textarea>
-      <p class="noprint"><button type="button" onclick="const t=document.getElementById('s4text'); t.focus(); t.select(); document.execCommand('copy');">全選並複製</button></p>
+      ${speciesTableHtml(speciesOrdered, active.length)}
+      <h2>SECTION 4<br>CONCLUSION</h2>
+      <p>${section4Body.replace(/\n/g, '</p><p>')}</p>
       <h2>Tree Group Summary</h2>
       ${tgSummaryHtml}
-      ${extraKindHtml('INDIVIDUAL', 'Individual trees in TPRP')}
-      ${extraKindHtml('NEW', 'Newly found trees')}
+      </div>
     ` : '';
 
     const monthYear = new Date().toLocaleString('en',{month:'long',year:'numeric'});
@@ -622,8 +935,10 @@ ${section4Body}`;
       <p style="text-align:center">${esc(project || 'Schedule to Form 1')}<br>${esc(monthYear)}</p>
       ${mode === 'construction' ? section4 : privateBody}
     `;
-    const box = document.getElementById('s4text');
-    if (box) box.value = section4Plain;
+    const btnWord = document.getElementById('btnWord');
+    const btnExcel = document.getElementById('btnExcel');
+    if (btnWord) btnWord.onclick = () => exportWord(reportData);
+    if (btnExcel) btnExcel.onclick = () => exportExcel(reportData);
   };
   reader.readAsArrayBuffer(file);
 }
