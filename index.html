@@ -307,6 +307,79 @@ function collectRemarkMismatches(trees) {
   }
   return [...map.values()].sort((a, b) => b.nos.length - a.nos.length || a.item.localeCompare(b.item));
 }
+
+function sortTreeNos(nos) {
+  return [...nos].sort((a, b) => {
+    const na = parseInt(String(a).replace(/\D/g, ''), 10) || 0;
+    const nb = parseInt(String(b).replace(/\D/g, ''), 10) || 0;
+    if (na !== nb) return na - nb;
+    return String(a).localeCompare(String(b), 'en', { numeric: true });
+  });
+}
+function normSciName(sci) {
+  return s(sci).toLowerCase().replace(/×/g, 'x').replace(/\./g, '');
+}
+function collectNameMismatches(trees) {
+  const rows = trees.filter(t => s(t.sci) || s(t.chi));
+  const pack = list => {
+    const map = {};
+    list.forEach(t => {
+      const k = s(t.sci) + '|' + s(t.chi);
+      if (!map[k]) map[k] = { sci: s(t.sci), chi: s(t.chi), nos: [] };
+      map[k].nos.push(t.no);
+    });
+    return Object.values(map).map(v => ({ ...v, nos: sortTreeNos(v.nos), n: v.nos.length }))
+      .sort((a, b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()) || a.chi.localeCompare(b.chi, 'zh'));
+  };
+  const bySci = {};
+  rows.forEach(t => {
+    const k = normSciName(t.sci);
+    if (!k) return;
+    if (!bySci[k]) bySci[k] = [];
+    bySci[k].push(t);
+  });
+  const sameSci = [];
+  Object.values(bySci).forEach(list => {
+    const chis = new Set(list.map(t => s(t.chi)));
+    if (chis.size > 1) sameSci.push({ sci: s(list[0].sci), variants: pack(list) });
+  });
+  sameSci.sort((a, b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()));
+
+  const chiNames = [...new Set(rows.map(t => s(t.chi)).filter(Boolean))];
+  const parent = Object.fromEntries(chiNames.map(c => [c, c]));
+  const find = x => parent[x] === x ? x : (parent[x] = find(parent[x]));
+  const unite = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[a] = b; };
+  for (let i = 0; i < chiNames.length; i++) {
+    for (let j = i + 1; j < chiNames.length; j++) {
+      const a = chiNames[i], b = chiNames[j];
+      if (a === b) continue;
+      const [sh, lo] = a.length <= b.length ? [a, b] : [b, a];
+      if (sh.length >= 2 && lo.includes(sh)) unite(a, b);
+    }
+  }
+  const byRoot = {};
+  rows.forEach(t => {
+    const c = s(t.chi);
+    if (!c) return;
+    const r = find(c);
+    if (!byRoot[r]) byRoot[r] = [];
+    byRoot[r].push(t);
+  });
+  const similarChi = [];
+  Object.values(byRoot).forEach(list => {
+    const scis = new Set(list.map(t => normSciName(t.sci)));
+    const chis = new Set(list.map(t => s(t.chi)));
+    if (scis.size > 1 && (chis.size > 1 || [...scis].filter(Boolean).length > 1)) {
+      similarChi.push({
+        names: [...chis].sort((a, b) => a.localeCompare(b, 'zh')),
+        variants: pack(list),
+        trees: [...list].sort((a, b) => { const o = sortTreeNos([a.no, b.no]); return o[0] === a.no ? -1 : 1; })
+      });
+    }
+  });
+  similarChi.sort((a, b) => a.names.join('、').localeCompare(b.names.join('、'), 'zh'));
+  return { sameSci, similarChi };
+}
 const ids = list => list.map(t => typeof t === 'string' ? esc(t) : esc(t.no)).join(', ') || '/';
 const joinNos = list => (list && list.length) ? list.map(t => typeof t === 'string' ? t : t.no).join(', ') : '/';
 function formSpeciesText(sci, chi) {
@@ -1076,6 +1149,7 @@ function run(file) {
         complete: c.complete >= 0 ? r[c.complete] : '', status: c.status >= 0 ? s(r[c.status]) : '' });
     }
     const remarkMismatches = collectRemarkMismatches(trees);
+    const nameMismatches = collectNameMismatches(trees);
     const dropped = /duplicate|not in use|out of lot|outside|boundary/i;
     const active = trees.filter(t => (mode === 'construction' || !isRemoved(t.remarks)) && !dropped.test(t.remarks + ' ' + t.rec));
     const species = {};
@@ -1231,6 +1305,19 @@ ${totalLine}`;
         </table>
         <p>報告會保留 Schedule 上的品種名稱，不會因為 Remarks 寫了 Dead tree 就自動改種；請在 Schedule 核對品種或備註。</p>
       </div>` : '';
+    const nameWarn = (nameMismatches.sameSci.length || nameMismatches.similarChi.length) ? `
+      <div class="warn noprint">
+        <h3>請核對：同一樹種的學名或中文名不一致</h3>
+        ${nameMismatches.sameSci.length ? `<p>同一學名但中文名不同</p>
+        <table><tr><th>Scientific Name</th><th>Chinese Name</th><th>棵數</th><th>Tree No.</th></tr>
+        ${nameMismatches.sameSci.map(g => g.variants.map(v => `<tr><td><span class="sci">${esc(v.sci)}</span></td><td>${esc(v.chi)}</td><td>${v.n}</td><td>${ids(v.nos)}</td></tr>`).join('')).join('')}
+        </table>` : ''}
+        ${nameMismatches.similarChi.length ? `<p>同一或相近中文名但學名不同${nameMismatches.similarChi.map(g => '（' + g.names.join('、') + '）').join('')}</p>
+        <table><tr><th>Tree No.</th><th>Scientific Name</th><th>Chinese Name</th></tr>
+        ${nameMismatches.similarChi.map(g => g.trees.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span></td><td>${esc(t.chi)}</td></tr>`).join('')).join('')}
+        </table>` : ''}
+        <p>報告仍按 Schedule 的用字分開統計；請在 Schedule 統一名稱。</p>
+      </div>` : '';
     const remarkWarn = remarkMismatches.length ? `
       <div class="warn noprint">
         <h3>請核對：${remarkMismatches.length} 項 Remarks 類似但不是缺陷表的標準 description</h3>
@@ -1239,7 +1326,7 @@ ${totalLine}`;
         </table>
         <p>完全符合表內用字的項目不會列出。</p>
       </div>` : '';
-    const warnBox = speciesWarn + remarkWarn;
+    const warnBox = speciesWarn + nameWarn + remarkWarn;
     const privateBody = `
       <p class="noprint">
         <button type="button" id="btnWord">匯出 Word</button>
