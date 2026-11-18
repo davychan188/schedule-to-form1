@@ -794,7 +794,7 @@ function run(file) {
     }
     const remarkMismatches = collectRemarkMismatches(trees);
     const dropped = /duplicate|not in use|out of lot|outside|boundary/i;
-    const active = trees.filter(t => !dropped.test(t.remarks + ' ' + t.rec));
+    const active = trees.filter(t => (mode === 'construction' || !isRemoved(t.remarks)) && !dropped.test(t.remarks + ' ' + t.rec));
     const species = {};
     active.forEach(t => {
       const k = t.sci + '|' + t.chi;
@@ -948,7 +948,7 @@ ${totalLine}`;
       ${formA.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}${isRemoved(t.remarks) ? ' (Removed)' : ''}</td><td>${esc(t.dbh)}</td><td>${esc(t.ht)}</td><td>${esc(t.triage)}</td><td>${esc(t.rec)}</td></tr>`).join('')}
       </table>
       <h2>Form 1 Table (B) — Other trees (${formB.length})</h2>
-      <p class="note">品種摘要見 Section 5。有效總數 ${active.length}${removedN ? '（' + removedN + ' 棵已標示 Removed）' : ''}。TPRP ${tprpN}／新發現 ${newN}。工作表：${esc(usedSheet)}</p>
+      <p class="note">品種摘要見 Section 5。有效總數 ${active.length}（已排除 Removed）。TPRP ${tprpN}／新發現 ${newN}。工作表：${esc(usedSheet)}</p>
     `;
     document.getElementById('out').innerHTML = `
       ${warnBox}
