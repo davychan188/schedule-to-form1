@@ -69,7 +69,7 @@ const looks = v => {
   if (!/\d/.test(t) || t.length > 32) return false;
   return /^[A-Za-z0-9][A-Za-z0-9\-_.\/]*[A-Za-z0-9]$/.test(t) || /^\d+[A-Za-z]?$/.test(t);
 };
-const isRemoved = r => /^removed(\s|$|,|;|\/)/i.test(r) || (/\bremoved\b/i.test(r) && !/trunk|branch/i.test(r));
+const isRemoved = r => s(r).split(/[,;，、]/).map(x => x.trim()).some(p => /^removed\.?$/i.test(p));
 const isDeadSpecies = (sci, chi) => /dead\s*trees?|^dead$|unidentified|死樹|枯樹/i.test((s(sci) + ' ' + s(chi)).trim());
 const remarkIsDeadTree = rem => {
   const t = s(rem);
@@ -1066,8 +1066,10 @@ function run(file) {
       if (remarkIsDeadTree(remarks) && !isDeadSpecies(sci, chi)) {
         speciesRemarkDead.push({ no, sci, chi, remarks });
       }
-      if (deadAs === 'Unidentified' && /dead tree|^dead$/i.test(remarks + ' ' + sci)) { sci = 'Unidentified'; chi = 'Unidentified'; }
-      else if (/dead tree|^dead$/i.test(remarks + ' ' + sci)) { sci = 'Dead tree'; chi = '死樹'; }
+      if (isDeadSpecies(sci, chi) || (!sci && !chi)) {
+        if (deadAs === 'Unidentified') { sci = 'Unidentified'; chi = 'Unidentified'; }
+        else { sci = 'Dead tree'; chi = '死樹'; }
+      }
       trees.push({ no, sci, chi, dbh: s(r[c.dbh]), ht: s(r[c.ht]), spread: s(r[c.sp]),
         health: s(r[c.health]), struct: s(r[c.struct]), triage: s(r[c.triage]),
         remarks, rec, zone: s(r[c.zone]), source: s(r[c.source]),
@@ -1085,7 +1087,8 @@ function run(file) {
     });
     const spRows = Object.entries(species).map(([k,v]) => { const [sci,chi]=k.split('|'); return {sci,chi,n:v.n,removed:v.removed}; })
       .sort((a,b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()));
-    const dom = Object.entries(species).sort((a,b)=>b[1].n-a[1].n)[0];
+    const liveSpRows = Object.entries(species).filter(([k]) => { const [sci,chi]=k.split('|'); return !isDeadSpecies(sci, chi); });
+    const dom = (liveSpRows.length ? liveSpRows : Object.entries(species)).sort((a,b)=>b[1].n-a[1].n)[0];
     const domSci = dom ? dom[0].split('|')[0] : 'N.A.';
     const domRest = dom ? `${dom[0].split('|')[1]} (${dom[1].n})`.trim() : '';
     const PRUNE = /crown cleaning|crown reduction|crown raising|crown thinning|pruning|selective|defective branch|dead (trunk|branch)|co-dominant|epicormic/i;
@@ -1167,7 +1170,7 @@ ${totalLine}`;
     const otherPhrase = !otherGroups.length ? ''
       : otherGroups.length === 1 ? `, and ${otherGroups[0].n} for ${otherGroups[0].label}`
       : `, and ${others.length} for other mitigation measures (${otherGroups.map(g => g.label).join('; ')})`;
-    const section5Intro = `A total of ${active.length} trees and ${spRows.length} species were recorded. The dominant species is ${domSci}${domRest ? ' ' + domRest : ''}.`;
+    const section5Intro = `A total of ${active.length} trees and ${speciesLive.length} species were recorded. The dominant species is ${domSci}${domRest ? ' ' + domRest : ''}.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}`;
     const section6Intro = `A total of ${prune.length} trees were recommended for pruning, ${removal.length} number were recommended for tree removal, ${monitor.length} for keep monitoring, ${pest.length} for pest control${otherPhrase}. (See Table 1). The proposed mitigations for specific trees are summarised in the table (See Table 2). For details, please refer to Section 7 – Appendix D (Tree inventory).`;
     const triageRows = [
       {colour: 'Black', n: blk.length, nos: joinNos(blk)},
@@ -1226,7 +1229,7 @@ ${totalLine}`;
         <table><tr><th>Tree No</th><th>Tree species</th><th>Remarks</th></tr>
         ${speciesRemarkDead.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}</td><td>${esc(t.remarks)}</td></tr>`).join('')}
         </table>
-        <p>報告仍會按 Dead tree 處理這些樹；請在 Schedule 更正品種或備註。</p>
+        <p>報告會保留 Schedule 上的品種名稱，不會因為 Remarks 寫了 Dead tree 就自動改種；請在 Schedule 核對品種或備註。</p>
       </div>` : '';
     const remarkWarn = remarkMismatches.length ? `
       <div class="warn noprint">
@@ -1244,7 +1247,7 @@ ${totalLine}`;
       </p>
       <div id="report">
       <h2>Section 5<br>Tree Survey Findings</h2>
-      <p>A total of ${active.length} trees and ${spRows.length} species were recorded. The dominant species is <span class="sci">${esc(domSci)}</span> ${esc(domRest)}.</p>
+      <p>A total of ${active.length} trees and ${speciesLive.length} species were recorded. The dominant species is <span class="sci">${esc(domSci)}</span> ${esc(domRest)}.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}</p>
       <table><tr><th>Tree Species</th><th>Quantity</th></tr>
       ${spRows.map(x => `<tr><td><span class="sci">${esc(x.sci)}</span> ${esc(x.chi)}</td><td>${esc(qtyLabel(x))}</td></tr>`).join('')}
       <tr><td>Total number of trees</td><td>${active.length}</td></tr></table>
