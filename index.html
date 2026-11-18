@@ -42,7 +42,7 @@
   <label><input type="radio" name="mode" value="construction" checked> Construction（3.3 及 Section 4）</label>
   <label><input type="radio" name="mode" value="private"> Private（不出 Section 4）</label>
 </div>
-<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；用字相近但不是標準 description 的項目會列出。</p>
+<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單。</p>
 <div id="out"></div>
 <script>
 const drop = document.getElementById('drop');
@@ -228,6 +228,211 @@ const DEFECTS = [
   "Wound on trunk union",
   "Wound sealed by concrete"
 ];
+const SPECIES_LIST = [
+  ["Acacia auriculiformis A. Cunn. ex Benth.","耳果相思","耳葉相思","大葉相思"],
+  ["Acacia confusa Merr.","台灣相思","相思樹","台灣柳","相思仔"],
+  ["Acacia mangium Willd.","大葉相思","馬占相思"],
+  ["Acer tutcheri Duthie","嶺南槭"],
+  ["Adenanthera microsperma Teijsm. and Binn.","海紅豆","孔雀豆","相思格"],
+  ["Ailanthus fordii Noot.","常綠臭椿","福氏臭椿"],
+  ["Alangium chinense (Lour.) Harms","八角楓"],
+  ["Albizia julibrissin Durazz.","合歡"],
+  ["Albizia lebbeck (L.) Benth.","大葉合歡","闊莢合歡"],
+  ["Aleurites moluccana (L.) Willd.","石栗"],
+  ["Alstonia scholaris (L.) R. Br.","糖膠樹","黑板樹","麵條樹","燈架樹"],
+  ["Aquilaria sinensis (Lour.) Spreng.","土沉香","牙香樹","白木香"],
+  ["Araucaria columnaris (G. Forst.) Hook.","柱狀南洋杉"],
+  ["Araucaria cunninghamii Aiton ex D. Don","南洋杉"],
+  ["Archontophoenix alexandrae (F. Muell.) H. Wendl. & Drude","假檳榔","亞力山大椰子"],
+  ["Areca catechu L.","檳榔"],
+  ["Areca triandra Roxb. ex Buch.-Ham.","三藥檳榔"],
+  ["Artocarpus heterophyllus Lam.","菠蘿蜜","樹菠蘿","木菠蘿"],
+  ["Averrhoa carambola L.","楊桃","五斂子","洋挑"],
+  ["Bauhinia purpurea L.","紅花羊蹄甲","羊蹄甲","洋紫荊"],
+  ["Bauhinia variegata L.","宮粉羊蹄甲","洋紫荊","羊蹄甲","彎葉樹"],
+  ["Bauhinia variegata L. var. candida (Aiton) Buch.-Ham.","白花洋紫荊","白花羊蹄甲","大白花"],
+  ["Bauhinia × blakeana Dunn","洋紫荊","紅花羊蹄甲","豔紫荊"],
+  ["Bischofia javanica Blume","秋楓","茄苳"],
+  ["Bischofia polycarpa (H. Lév.) Airy Shaw","重陽木"],
+  ["Bismarckia nobilis Hildebrandt & H. Wendl.","霸王棕"],
+  ["Bombax ceiba L.","木棉","紅棉","英雄樹","攀枝花"],
+  ["Bougainvillea spectabilis Willd.","葉子花","毛寶巾","簕杜鵑","九重葛"],
+  ["Brachychiton acerifolius (A. Cunn.) Macarthur & C. Moore","槭葉蘋婆"],
+  ["Bridelia tomentosa Blume","土蜜樹","逼迫仔"],
+  ["Broussonetia papyrifera (L.) L’Hér. ex Vent.","構樹","鹿仔樹"],
+  ["Callistemon rigidus R. Br.","紅千層","瓶子刷樹","紅瓶子刷樹"],
+  ["Callistemon viminalis (Sol. ex Gaertn.) G. Don","串錢柳","垂枝紅千層"],
+  ["Carica papaya L.","番木瓜"],
+  ["Caryota maxima Blume","魚尾葵","青棕","假桄榔"],
+  ["Cassia fistula L.","臘腸樹","豬腸豆","阿勃勒","牛角樹","波斯皂莢"],
+  ["Castanopsis fissa (Champ. ex Benth.) Rehder and E.H. Wilson","黧蒴錐","裂斗錐栗"],
+  ["Casuarina equisetifolia L.","木麻黃","牛尾松","馬尾樹"],
+  ["Ceiba pentandra (L.) Gaertn.","吉貝","美洲木棉"],
+  ["Celtis sinensis Pers.","朴樹"],
+  ["Cerbera manghas L.","海杧果"],
+  ["Chorisia speciosa A. St.-Hil.","絲木棉","美人樹","美麗異木棉"],
+  ["Chukrasia tabularis A. Juss.","麻楝"],
+  ["Cinnamomum burmannii (Nees & T. Nees) Blume","陰香","山肉桂"],
+  ["Cinnamomum camphora (L.) J. Presl","樟","樟樹","樟腦樹"],
+  ["Cinnamomum parthenoxylon (Jack) Meisn.","黃樟","黃樟木"],
+  ["Citrus maxima (Burm.) Merr.","柚子"],
+  ["Clausena lansium (Lour.) Skeels","黃皮","黃皮子","黃皮果"],
+  ["Cleistocalyx nervosum (DC.) Kosterm.","水翁","水翁蒲桃","水榕"],
+  ["Corymbia citriodora (Hook.) K. D. Hill & L. A. S. Johnson","檸檬桉"],
+  ["Corymbia torelliana (F. Muell.) K. D. Hill & L. A. S. Johnson","毛葉桉"],
+  ["Crateva trifoliata (Roxb.) B. S. Sun","鈍葉魚木","赤果魚木"],
+  ["Crateva unilocularis Buch.-Ham.","樹頭菜"],
+  ["Cratoxylum cochinchinense (Lour.) Blume","黃牛木","鳥籠木"],
+  ["Dalbergia odorifera T. C. Chen","降香黃檀"],
+  ["Delonix regia (Bojer ex Hook.) Raf.","鳳凰木","鳳凰花","紅花楹","火樹"],
+  ["Dillenia indica L.","五椏果","第倫桃"],
+  ["Dimocarpus longan Lour.","龍眼","桂圓","圓眼"],
+  ["Dracontomelon duperreanum Pierre","人面子","銀蓮果"],
+  ["Dypsis decaryi (Jum.) Beentje & J. Dransf","三角椰子"],
+  ["Ehretia acuminata R. Br.","厚殼樹"],
+  ["Elaeis guineensis Jacq.","油棕"],
+  ["Elaeocarpus chinensis (Gardner and Champ.) Hook. f. ex Benth.","中華杜英","野杜英"],
+  ["Elaeocarpus hainanensis Oliv.","水石榕"],
+  ["Elaeocarpus sylvestris (Lour.) Poir.","山杜英","膽八樹","羊屎樹","羊仔樹"],
+  ["Eriobotrya japonica (Thunb.) Lindl.","枇杷"],
+  ["Erythrina variegata L.","刺桐"],
+  ["Eucalyptus camaldulensis Dehnh.","赤桉"],
+  ["Eucalyptus exserta F. Muell.","窿緣桉"],
+  ["Eucalyptus robusta Sm.","大葉桉"],
+  ["Eucalyptus tereticornis Sm.","細葉桉"],
+  ["Eucalyptus urophylla S. T. Blake","尾葉桉"],
+  ["Falcataria moluccana (Miq.) Barneby and J. W. Grimes","南洋楹"],
+  ["Ficus altissima Blume","高山榕","雞榕","大青樹","萬年青"],
+  ["Ficus benjamina L.","垂葉榕","垂榕","白榕"],
+  ["Ficus benjamina L. 'Variegata'","花葉垂榕","花葉垂葉榕","斑葉垂榕"],
+  ["Ficus elastica Roxb. ex Hornem.","印度榕","印度橡樹"],
+  ["Ficus hispida L. f.","對葉榕","牛乳樹","牛奶子","乳汁麻木","豬母茶"],
+  ["Ficus microcarpa L. f.","細葉榕","榕樹","萬年青"],
+  ["Ficus microcarpa L.f. 'Golden Leaves'","黃金榕","黃榕"],
+  ["Ficus racemosa L.","聚果榕","優曇華"],
+  ["Ficus religiosa L.","菩提樹","思維樹","印度菩提樹","阿思多羅","印度波樹"],
+  ["Ficus rumphii Blume","心葉榕","假菩提樹"],
+  ["Ficus subpisocarpa Gagnep.","筆管榕"],
+  ["Ficus variegata Blume","青果榕","雜色榕"],
+  ["Ficus virens Aiton","黃葛樹","大葉榕","綠黃葛樹","黃桷樹"],
+  ["Garcinia subelliptica Merr.","菲島福木"],
+  ["Grevillea banksii R. Br.","昆士蘭銀樺","紅花銀樺"],
+  ["Grevillea robusta A. Cunn. ex R. Br.","銀樺"],
+  ["Heritiera littoralis Aiton","銀葉樹"],
+  ["Heteropanax fragrans (Roxb.) Seem.","幌傘楓","火通木"],
+  ["Hibiscus tiliaceus L.","黃槿","桐花","海麻","萬年春"],
+  ["Hyophorbe lagenicaulis (L.H. Bailey) H. E. Moore","酒瓶椰子"],
+  ["Hyophorbe verschaffeltii (W.Bull ex J.Dix) H.Wendl","棍棒椰子"],
+  ["Ilex rotunda Thunb. var. microcarpa (Lindl. ex Paxton) S. Y. Hu","小果鐵冬青"],
+  ["Jacaranda mimosifolia D. Don","藍花楹"],
+  ["Juniperus chinensis L.","圓柏","檜","刺柏"],
+  ["Khaya senegalensis (Desr.) A. Juss.","非洲楝","塞內加爾楝","非洲桃花心木","仙加樹"],
+  ["Kigelia africana (Lam.) Benth.","吊瓜樹","吊燈樹"],
+  ["Koelreuteria bipinnata Franch.","複羽葉欒樹","國慶花"],
+  ["Lagerstroemia indica L.","紫薇"],
+  ["Lagerstroemia speciosa (L.) Pers.","大花紫薇","大葉紫薇","洋紫薇","百日紅"],
+  ["Ligustrum liukiuense Koidz.","台灣女貞","日本女貞","琉球女貞"],
+  ["Ligustrum sinense Lour.","山指甲","小蠟樹"],
+  ["Liquidambar formosana Hance","楓香","楓香樹"],
+  ["Litchi chinensis Sonn.","荔枝"],
+  ["Litsea glutinosa (Lour.) C. B. Rob.","潺槁樹","潺槁木薑子","油槁樹","膠樟"],
+  ["Litsea monopetala (Roxb.) Pers.","假柿木薑子","假柿樹"],
+  ["Livistona chinensis (Jacq.) R.Br. ex Mart.","蒲葵","葵樹"],
+  ["Lophostemon confertus (R. Br.) Peter G. Wilson & J. T. Waterh.","紅膠木"],
+  ["Lysidice rhodostegia Hance","儀花"],
+  ["Macaranga tanarius (L.) Müll. Arg. var. tomentosa (Blume) Müll. Arg.","血桐","流血桐","帳篷樹"],
+  ["Machilus chekiangensis S. K. Lee","浙江潤楠","長序潤楠"],
+  ["Magnolia grandiflora L.","荷花玉蘭","洋玉蘭","廣玉蘭","荷花木蘭"],
+  ["Mallotus paniculatus (Lam.) Müll. Arg.","白楸","力樹","黃背桐","白葉子"],
+  ["Mangifera indica L.","杧果"],
+  ["Markhamia stipulata (Wall.) Seem. ex K. Schum. var. kerrii Sprague","貓尾木","西南貓尾木"],
+  ["Melaleuca bracteata F. Muell. 'Revolution Gold'","黃金串錢柳","黃金香柳"],
+  ["Melaleuca cajuputi Roxb. subsp. cumingiana (Turcz.) Barlow","白千層"],
+  ["Melia azedarach L.","楝","苦楝","森樹","紫花樹"],
+  ["Michelia figo (Lour.) Spreng.","含笑"],
+  ["Michelia x alba DC.","白蘭","白蘭花","白玉蘭"],
+  ["Microcos nervosa (Lour.) S. Y. Hu","破布葉","布渣葉"],
+  ["Morus alba L.","桑","桑樹"],
+  ["Murraya paniculata (L.) Jack","九里香","千里香","月橘"],
+  ["Nageia nagi (Thunb.) Kuntze","竹柏"],
+  ["Nerium oleander L.","夾竹桃"],
+  ["Ormosia pinnata (Lour.) Merr.","海南紅豆"],
+  ["Pachira glabra Pasq.","瓜栗","發財樹"],
+  ["Peltophorum pterocarpum (DC.) Baker ex K. Heyne","盾柱木","雙翼豆","閉筴木"],
+  ["Peltophorum tonkinense (Pierre) Gagnep.","銀珠","油楠"],
+  ["Phoenix canariensis Chabaud","加那利刺葵","加拿利海棗"],
+  ["Phoenix dactylifera L.","海棗"],
+  ["Phoenix roebelenii O’Brien","江邊刺葵","日本葵","軟葉刺葵"],
+  ["Phoenix sylvestris (L.) Roxb.","銀海棗","林刺葵"],
+  ["Pinus massoniana Lamb.","馬尾松"],
+  ["Platycladus orientalis (L.) Franco","側柏"],
+  ["Plumeria rubra L.","雞蛋花","紅雞蛋花","鹿角樹"],
+  ["Podocarpus macrophyllus (Thunb.) Sweet","羅漢松"],
+  ["Polyspora axillaris (Roxb. ex Ker Gawl.) Sweet","大頭茶","南投大頭茶"],
+  ["Pongamia pinnata (L.) Merr.","水黃皮","水流豆","野豆"],
+  ["Prunus campanulata Maxim.","鐘花櫻桃","山櫻","緋寒櫻"],
+  ["Psidium cattleianum Sabine var. littorale (Raddi) Mattos","草莓番石榴"],
+  ["Psidium guajava L.","番石榴"],
+  ["Pterocarpus indicus Willd.","紫檀","印度紫檀","牛血樹","青龍木"],
+  ["Ravenala madagascariensis Sonn.","旅人蕉","扇芭蕉"],
+  ["Reevesia thyrsoidea Lindl.","梭羅樹","兩廣梭羅"],
+  ["Roystonea regia (Kunth) O.F. Cook","大王椰子","王棕"],
+  ["Sapindus saponaria L.","無患子","木患子","肥皂果"],
+  ["Sapium discolor (Champ. ex Benth.) Müll. Arg.","山烏桕"],
+  ["Sapium sebiferum (L.) Roxb.","烏桕"],
+  ["Schefflera actinophylla (Endl.) Harms","輻葉鵝掌柴","澳洲鵝掌柴","傘樹"],
+  ["Schefflera heptaphylla (L.) Frodin","鵝掌柴","鴨腳木"],
+  ["Schima superba Gardner & Champ.","木荷","荷樹"],
+  ["Senna siamea (Lam.) H. S. Irwin & Barneby","鐵刀木","黑心樹","挨刀樹"],
+  ["Senna surattensis (Burm. f.) H. S. Irwin & Barneby","黃槐決明","黃槐"],
+  ["Spathodea campanulata P. Beauv.","火焰樹","火焰木","噴泉樹","火燒花"],
+  ["Spondias lakonensis Pierre","嶺南酸棗"],
+  ["Sterculia lanceolata Cav.","假蘋婆","雞冠木","賽蘋婆"],
+  ["Swietenia mahagoni (L.) Jacq.","桃花心木","小葉桃花心木"],
+  ["Syagrus romanzoffiana (Cham.) Glassman","皇后葵","金山葵","女王椰子"],
+  ["Syzygium cumini (L.) Skeels","烏墨","海南蒲桃","烏口樹","肯氏蒲桃"],
+  ["Syzygium jambos (L.) Alston","蒲桃"],
+  ["Syzygium levinei (Merr.) Merr. and L. M. Perry","山蒲桃","白車"],
+  ["Tabebuia argentea (Bureau and K. Schum.) Britton","銀鱗金鈴木","銀鱗風鈴木","黃金風鈴木"],
+  ["Tabebuia chrysantha (Jacq.) G. Nicholson","黃鐘木","黃花風鈴木"],
+  ["Tabebuia impetiginosa (Mart. ex DC.) Standl.","紫花風鈴木"],
+  ["Tabebuia rosea (Bertol.) DC.","洋紅風鈴木"],
+  ["Taxodium distichum (L.) Rich.","落羽杉"],
+  ["Terminalia catappa L.","欖仁樹","大葉欖仁","山枇杷樹"],
+  ["Terminalia mantaly H. Perrier","小葉欖仁","細葉欖仁","非洲欖仁"],
+  ["Terminalia muelleri Benth.","澳洲欖仁"],
+  ["Ternstroemia gymnanthera (Wight & Arn.) Bedd.","厚皮香"],
+  ["Thevetia peruviana (Pers.) K. Schum.","黃花夾竹桃","酒杯花"],
+  ["Toona sinensis (A. Juss.) M. Roem.","香椿"],
+  ["Trachycarpus fortunei (Hook.) H. Wendl.","棕櫚"],
+  ["Vernicia montana Lour.","木油樹","千年桐","皺桐"],
+  ["Viburnum odoratissimum Ker Gawl.","珊瑚樹","極香莢蒾","早禾樹","山豬肉"],
+  ["Washingtonia robusta H.Wendl.","大絲葵","華盛頓葵"],
+  ["Wodyetia bifurcata A.K.Irvine","狐尾椰子","狐尾棕"],
+  ["Xanthostemon chrysanthus (F. Muell.) Benth.","金蒲桃"],
+  ["Yulania × soulangeana (Soul.-Bod.) D. L. Fu","二喬木蘭","紫玉蘭"],
+  ["Artocarpus hypargyreus Hance ex Benth.","白桂木"],
+  ["Camellia crapnelliana Tutcher","紅皮糙果茶","克氏茶","多苞糙果茶"],
+  ["Camellia japonica L.","山茶","洋茶","茶花","晚山茶","耐冬","山椿","藪春","曼佗羅","野山茶"],
+  ["Cananga odorata (Lam.) Hook. f. & Thomson","依蘭","依蘭香","香水樹","依蘭依蘭"],
+  ["Choerospondias axillaris (Roxb.) B. L. Burtt & A. W. Hill","南酸棗","酸棗","山棗","山棗子","棗子","山桉果","五眼果","五眼睛果","鼻子果","鼻涕果","花心木","醋酸果","棉麻樹","啃不死"],
+  ["Ficus nervosa B. Heyne ex Roth","凸葉榕","九丁樹","大葉九重樹","豬麻榕樹","大葉九重吹","大葉九重榕","九重吹","破布","凸脈榕","顯脈榕"],
+  ["Michelia champaca L.","黃蘭","黃玉蘭","黃緬桂"],
+  ["Ormosia henryi Prain","花梨木","花櫚木","亨氏红豆"],
+  ["Osmanthus fragrans (Thunb.) Lour.","桂花","木犀"],
+  ["Phoenix loureiroi Kunth.","刺葵","臺灣海棗"],
+  ["Pinus elliottii Engelm.","濕地松","愛氏松"],
+  ["Plumeria rubra var. acutifolia","黃雞蛋花","緬梔","緬梔子"],
+  ["Rhodoleia championii Hook. f.","紅花荷","紅苞木","吊鐘王"],
+  ["Samanea saman (Jacq.) Merr.","雨樹"],
+  ["Saraca dives Pierre","中國無憂花"],
+  ["Syzygium hancei Merr. & L. M. Perry","韓氏蒲桃","紅鱗蒲桃"],
+  ["Syzygium samarangense (Blume) Merr. & L. M. Perry","洋蒲桃"],
+  ["Tamarindus indica L.","酸豆","酸梅","酸角","羅望子"],
+  ["Terminalia arjuna Wight & Arn.","阿江欖仁"],
+  ["Thespesia populnea (L.) Sol. ex Corr.","恆春黃槿","繖楊","桐棉","楊葉肖槿"],
+  ["Yulania liliiflora (Desr.) D. L. Fu","紫玉蘭","辛夷","木筆"]
+];
 const splitRemarks = rem => s(rem).split(/[,;，、]+/).map(x => x.replace(/\s+/g,' ').trim())
   .filter(x => x && !/^(n\.?a\.?|nan|nil|none|-)$/i.test(x));
 const defectKey = t => s(t).replace(/\u00a0/g,' ').replace(/[_]+/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
@@ -380,6 +585,196 @@ function collectNameMismatches(trees) {
   });
   similarChi.sort((a, b) => a.names.join('、').localeCompare(b.names.join('、'), 'zh'));
   return { sameSci, similarChi };
+}
+
+const SCI_RANKS = /^(var|subsp|ssp|subspecies|variety|f|fa|forma|cv|cultivar)$/;
+function parseSci(name) {
+  let t = s(name).toLowerCase()
+    .replace(/×/g, 'x')
+    .replace(/[\u2018\u2019\u201c\u201d]/g, "'")
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\./g, ' ')
+    .replace(/,/g, ' ');
+  const cvs = [];
+  t = t.replace(/'([^']+)'/g, (_, m) => { cvs.push(m.trim().replace(/\s+/g, ' ')); return ' '; });
+  t = t.replace(/'/g, ' ').replace(/\s+/g, ' ').trim();
+  const tokens = t.split(' ').filter(Boolean);
+  const rankNorm = r => (r === 'ssp' || r === 'subspecies') ? 'subsp'
+    : (r === 'variety') ? 'var'
+    : (r === 'fa' || r === 'forma') ? 'f'
+    : (r === 'cultivar') ? 'cv' : r;
+  const out = [];
+  let i = 0;
+  if (tokens.length) {
+    out.push(tokens[i++]);
+    if (tokens[i] === 'x') { out.push('x'); i++; }
+    if (i < tokens.length && !SCI_RANKS.test(tokens[i])) out.push(tokens[i++]);
+    while (i < tokens.length) {
+      const r = tokens[i], epi = tokens[i + 1];
+      if (SCI_RANKS.test(r) && epi && !SCI_RANKS.test(epi)) {
+        if (r === 'f' && epi.length < 3) { i++; continue; }
+        out.push(rankNorm(r), epi);
+        i += 2;
+      } else i++;
+    }
+  }
+  const cultivar = cvs[0] || '';
+  const binomial = out.slice(0, out[1] === 'x' ? 3 : 2).join(' ');
+  const core = (out.join(' ') + (cultivar ? " '" + cultivar + "'" : '')).trim();
+  return { binomial, core, cultivar, parts: out };
+}
+function prettySci(sci) {
+  const p = parseSci(sci);
+  const body = p.core.replace(/'([^']+)'/g, '').trim().split(/\s+/).filter(Boolean).map((tok, i) => {
+    if (i === 0) return tok.charAt(0).toUpperCase() + tok.slice(1);
+    if (tok === 'x') return '×';
+    if (tok === 'var' || tok === 'subsp' || tok === 'f' || tok === 'cv') return tok + '.';
+    return tok;
+  }).join(' ').replace(/ × /g, ' × ');
+  if (!p.cultivar) return body;
+  const cv = p.cultivar.replace(/(^|[\s-])\S/g, c => c.toUpperCase());
+  return body + " '" + cv + "'";
+}
+function normChi(c) {
+  return s(c).replace(/[台臺]/g, '台').replace(/红/g, '紅').replace(/[\s·・.．]/g, '');
+}
+function buildOfficialSpecies() {
+  return SPECIES_LIST.map(row => {
+    const sci = row[0];
+    const chi = row.slice(1);
+    return { sci, chi, chis: chi.map(normChi).filter(Boolean), label: prettySci(sci), ...parseSci(sci) };
+  });
+}
+function collectOfficialNameChecks(trees) {
+  const official = buildOfficialSpecies();
+  const byCore = new Map(), byBin = new Map(), byChi = new Map();
+  const add = (map, k, o) => { if (!k) return; if (!map.has(k)) map.set(k, []); map.get(k).push(o); };
+  official.forEach(o => {
+    add(byCore, o.core, o);
+    add(byBin, o.binomial, o);
+    o.chis.forEach(c => add(byChi, c, o));
+  });
+  const uniqOfficial = list => {
+    const seen = new Set(), out = [];
+    (list || []).forEach(o => { if (!seen.has(o.sci)) { seen.add(o.sci); out.push(o); } });
+    return out;
+  };
+  const sciHitsFor = sci => {
+    const p = parseSci(sci);
+    if (!p.core) return [];
+    const exact = byCore.get(p.core);
+    if (exact && exact.length) return uniqOfficial(exact);
+    return uniqOfficial(byBin.get(p.binomial) || []);
+  };
+  const chiHitsFor = chi => uniqOfficial(byChi.get(normChi(chi)) || []);
+  const similarOfficialChi = (chi, exclude) => {
+    const c = normChi(chi);
+    if (c.length < 2) return [];
+    const skip = new Set((exclude || []).map(o => o.sci));
+    const hits = [];
+    official.forEach(o => {
+      if (skip.has(o.sci)) return;
+      o.chis.forEach((oc, i) => {
+        if (oc === c) return;
+        const [sh, lo] = oc.length <= c.length ? [oc, c] : [c, oc];
+        if (sh.length >= 2 && lo.includes(sh)) hits.push({ o, alias: o.chi[i] });
+      });
+    });
+    return uniqOfficial(hits.map(h => h.o)).map(o => {
+      const alias = hits.find(h => h.o.sci === o.sci).alias;
+      return { o, alias };
+    });
+  };
+  const groups = {};
+  const blank = v => !s(v) || /^(n\.a\.?|nan|nil|none|-|\/)$/i.test(s(v));
+  trees.forEach(t => {
+    if (isDeadSpecies(t.sci, t.chi)) return;
+    const sci = blank(t.sci) ? '' : s(t.sci);
+    const chi = blank(t.chi) ? '' : s(t.chi);
+    if (!sci && !chi) return;
+    const k = sci + '|' + chi;
+    if (!groups[k]) groups[k] = { sci, chi, nos: [] };
+    groups[k].nos.push(t.no);
+  });
+  const typeOrder = { mismatch: 0, sci: 1, chi: 2, nosci: 3, nochi: 4 };
+  const issues = [];
+  Object.values(groups).forEach(g => {
+    const sh = s(g.sci) ? sciHitsFor(g.sci) : [];
+    const ch = s(g.chi) ? chiHitsFor(g.chi) : [];
+    if (s(g.sci) && s(g.chi) && sh.length && ch.length) {
+      const names = new Set(sh.map(o => o.sci));
+      if (ch.some(o => names.has(o.sci))) return;
+      issues.push({ ...g, type: 'mismatch', sciOfficial: sh, chiOfficial: ch, similar: [] });
+      return;
+    }
+    if (s(g.sci) && sh.length && s(g.chi) && !ch.length) {
+      issues.push({ ...g, type: 'chi', sciOfficial: sh, chiOfficial: [], similar: similarOfficialChi(g.chi, sh) });
+      return;
+    }
+    if (s(g.chi) && ch.length && (!s(g.sci) || !sh.length)) {
+      issues.push({ ...g, type: s(g.sci) ? 'sci' : 'nosci', sciOfficial: [], chiOfficial: ch, similar: [] });
+      return;
+    }
+    if (s(g.sci) && sh.length && !s(g.chi)) {
+      issues.push({ ...g, type: 'nochi', sciOfficial: sh, chiOfficial: [], similar: [] });
+    }
+  });
+  const officialChiText = list => {
+    const names = [];
+    const seen = new Set();
+    (list || []).forEach(o => o.chi.forEach(c => { if (!seen.has(c)) { seen.add(c); names.push(c); } }));
+    return names.join('、');
+  };
+  const officialSciText = list => (list || []).map(o => o.label).join('、');
+  issues.forEach(r => {
+    r.nos = sortTreeNos(r.nos);
+    r.n = r.nos.length;
+    let note = '';
+    if (r.type === 'mismatch') {
+      note = '學名對應官方中文名：' + officialChiText(r.sciOfficial) + '；中文名「' + r.chi + '」對應官方學名：' + officialSciText(r.chiOfficial);
+    } else if (r.type === 'chi') {
+      note = '此學名的官方中文名為：' + officialChiText(r.sciOfficial);
+    } else if (r.type === 'sci') {
+      note = '中文名「' + r.chi + '」的官方學名為：' + officialSciText(r.chiOfficial);
+    } else if (r.type === 'nosci') {
+      note = '缺少學名；此中文名的官方學名為：' + officialSciText(r.chiOfficial);
+    } else if (r.type === 'nochi') {
+      note = '缺少中文名；此學名的官方中文名為：' + officialChiText(r.sciOfficial);
+    }
+    if (r.similar && r.similar.length) {
+      note += '。「' + r.chi + '」接近清單中的' + r.similar.map(h => '「' + h.alias + '」（' + h.o.label + '）').join('、');
+    }
+    r.note = note;
+  });
+  issues.sort((a, b) => (typeOrder[a.type] - typeOrder[b.type]) || b.n - a.n
+    || a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()) || a.chi.localeCompare(b.chi, 'zh'));
+  return issues;
+}
+function officialNameNoteHtml(r) {
+  const italic = label => '<span class="sci">' + esc(label) + '</span>';
+  const officialChiText = list => {
+    const names = [];
+    const seen = new Set();
+    (list || []).forEach(o => o.chi.forEach(c => { if (!seen.has(c)) { seen.add(c); names.push(c); } }));
+    return names.map(esc).join('、');
+  };
+  const officialSciText = list => (list || []).map(o => italic(o.label)).join('、');
+  let note = '';
+  if (r.type === 'mismatch') {
+    note = '學名對應官方中文名：' + officialChiText(r.sciOfficial) + '；中文名「' + esc(r.chi) + '」對應官方學名：' + officialSciText(r.chiOfficial);
+  } else if (r.type === 'chi') {
+    note = '此學名的官方中文名為：' + officialChiText(r.sciOfficial);
+  } else if (r.type === 'sci') {
+    note = '中文名「' + esc(r.chi) + '」的官方學名為：' + officialSciText(r.chiOfficial);
+  } else if (r.type === 'nosci') {
+    note = '缺少學名；此中文名的官方學名為：' + officialSciText(r.chiOfficial);
+  } else if (r.type === 'nochi') {
+    note = '缺少中文名；此學名的官方中文名為：' + officialChiText(r.sciOfficial);
+  }
+  if (r.similar && r.similar.length) {
+    note += '。「' + esc(r.chi) + '」接近清單中的' + r.similar.map(h => '「' + esc(h.alias) + '」（' + italic(h.o.label) + '）').join('、');
+  }
+  return note;
 }
 const ids = list => list.map(t => typeof t === 'string' ? esc(t) : esc(t.no)).join(', ') || '/';
 const joinNos = list => (list && list.length) ? list.map(t => typeof t === 'string' ? t : t.no).join(', ') : '/';
@@ -1151,6 +1546,7 @@ function run(file) {
     }
     const remarkMismatches = collectRemarkMismatches(trees);
     const nameMismatches = collectNameMismatches(trees);
+    const officialChecks = collectOfficialNameChecks(trees);
     const dropped = /duplicate|not in use|out of lot|outside|boundary/i;
     const active = trees.filter(t => (mode === 'construction' || !isRemoved(t.remarks)) && !dropped.test(t.remarks + ' ' + t.rec));
     const species = {};
@@ -1328,7 +1724,15 @@ ${totalLine}`;
         </table>
         <p>已列出 Schedule 內所有 Remarks 用字（N.A. 除外）；符合標準的項目一併列出。</p>
       </div>` : '';
-    const warnBox = speciesWarn + nameWarn + remarkWarn;
+    const officialWarn = officialChecks.length ? `
+      <div class="warn noprint">
+        <h3>請核對：${officialChecks.length} 項學名或中文名與官方清單不符</h3>
+        <table><tr><th>Scientific Name</th><th>Chinese Name</th><th>棵數</th><th>Tree No.</th><th>核對結果</th></tr>
+        ${officialChecks.map(r => `<tr><td><span class="sci">${esc(r.sci)}</span></td><td>${esc(r.chi)}</td><td>${r.n}</td><td>${ids(r.nos)}</td><td>${officialNameNoteHtml(r)}</td></tr>`).join('')}
+        </table>
+        <p>依據發展局綠化網「二維條碼樹木標籤」203 種市區常見樹木清單核對（Dead tree、Unidentified 除外）。清單以外的品種不會列為不符。報告仍按 Schedule 用字統計，不會自動改名。</p>
+      </div>` : '';
+    const warnBox = speciesWarn + nameWarn + officialWarn + remarkWarn;
     const privateBody = `
       <p class="noprint">
         <button type="button" id="btnWord">匯出 Word</button>
