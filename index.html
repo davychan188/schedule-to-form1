@@ -42,7 +42,7 @@
   <label><input type="radio" name="mode" value="construction" checked> Construction（3.3 及 Section 4）</label>
   <label><input type="radio" name="mode" value="private"> Private（不出 Section 4）</label>
 </div>
-<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單。</p>
+<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單，並提示大小寫及寫法差異（不會自動改名）。</p>
 <div id="out"></div>
 <script>
 const drop = document.getElementById('drop');
@@ -547,7 +547,8 @@ function collectNameMismatches(trees) {
   const sameSci = [];
   Object.values(bySci).forEach(list => {
     const chis = new Set(list.map(t => s(t.chi)));
-    if (chis.size > 1) sameSci.push({ sci: s(list[0].sci), variants: pack(list) });
+    const typoChis = new Set(list.map(t => typoChi(t.chi)));
+    if (chis.size > 1 && typoChis.size > 1) sameSci.push({ sci: s(list[0].sci), variants: pack(list) });
   });
   sameSci.sort((a, b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()));
 
@@ -637,6 +638,76 @@ function prettySci(sci) {
 }
 function normChi(c) {
   return s(c).replace(/[台臺]/g, '台').replace(/红/g, '紅').replace(/[\s·・.．]/g, '');
+}
+function typoChi(c) {
+  return normChi(c).replace(/[杧芒]/g, '芒').replace(/[湾灣]/g, '灣');
+}
+function isBlankName(v) {
+  return !s(v) || /^(n\.a\.?|nan|nil|none|-|\/)$/i.test(s(v));
+}
+function typoSciKey(sci) {
+  return s(sci).toLowerCase().replace(/×/g, 'x').replace(/[\u2018\u2019]/g, "'").replace(/\.+/g, '.').replace(/\s+/g, ' ').trim();
+}
+function isIndetSci(sci) {
+  return /\bspp?\.?$/i.test(s(sci));
+}
+function expectedSciCase(name) {
+  const raw = s(name);
+  if (!raw) return raw;
+  const src = raw.normalize ? raw.normalize('NFKC') : raw;
+  const cvs = [];
+  let t = src;
+  t = t.replace(/['\u2018\u2019]([^'\u2018\u2019]+)['\u2018\u2019]/g, (_, m) => { cvs.push(m); return ' «CV' + (cvs.length - 1) + '» '; });
+  const tokens = t.split(/\s+/).filter(Boolean);
+  const RANK_MAP = { var: 'var.', variety: 'var.', subsp: 'subsp.', ssp: 'subsp.', subspecies: 'subsp.', f: 'f.', fa: 'f.', forma: 'f.', cv: 'cv.', cultivar: 'cv.' };
+  const stem = tok => tok.toLowerCase().replace(/\.+$/, '');
+  const isRank = tok => {
+    const st = stem(tok);
+    if (!Object.prototype.hasOwnProperty.call(RANK_MAP, st)) return false;
+    if ((st === 'f' || st === 'fa') && /^F\.?$/.test(tok)) return false;
+    return true;
+  };
+  const isHybrid = tok => /^(×|x)$/i.test(tok);
+  const isSp = tok => /^(sp|spp)\.?$/i.test(tok);
+  const capGenus = w => w.replace(/[A-Za-z\u00C0-\u024F]+/, m => m.charAt(0).toUpperCase() + m.slice(1).toLowerCase());
+  const lowEpi = w => w.replace(/[A-Za-z\u00C0-\u024F]+/g, m => m.toLowerCase());
+  const isFilius = tok => /^(f|fil|filius)\.?$/.test(tok);
+  const isAuthorInit = tok => /^\(?[A-Z]\.?\)?$/.test(tok) || /\)$/.test(tok) || /^\(/.test(tok);
+  if (!tokens.length) return raw;
+  const out = [];
+  let i = 0;
+  out.push(capGenus(tokens[i++]));
+  if (tokens[i] && isHybrid(tokens[i])) {
+    const h = tokens[i++];
+    out.push(h === 'X' || h === 'x' ? 'x' : h);
+  }
+  if (tokens[i] && !isRank(tokens[i])) {
+    out.push(isSp(tokens[i]) ? tokens[i].toLowerCase() : lowEpi(tokens[i]));
+    i++;
+  }
+  while (i < tokens.length) {
+    const tok = tokens[i];
+    if (/^«CV\d+»$/.test(tok)) { out.push(tok); i++; continue; }
+    if (isRank(tok)) {
+      if (isFilius(tok) && out.length && isAuthorInit(out[out.length - 1])) {
+        out.push(tok);
+        i++;
+        continue;
+      }
+      out.push(RANK_MAP[stem(tok)]);
+      i++;
+      if (tokens[i] && !isRank(tokens[i]) && !/^«CV/.test(tokens[i]) && !isAuthorInit(tokens[i])) {
+        out.push(lowEpi(tokens[i]));
+        i++;
+      }
+      continue;
+    }
+    out.push(tok);
+    i++;
+  }
+  let res = out.join(' ');
+  res = res.replace(/\s*«CV(\d+)»\s*/g, (_, n) => " '" + cvs[+n] + "' ");
+  return s(res);
 }
 function buildOfficialSpecies() {
   return SPECIES_LIST.map(row => {
@@ -775,6 +846,68 @@ function officialNameNoteHtml(r) {
     note += '。「' + esc(r.chi) + '」接近清單中的' + r.similar.map(h => '「' + esc(h.alias) + '」（' + italic(h.o.label) + '）').join('、');
   }
   return note;
+}
+function collectSciWritingChecks(trees) {
+  const pack = {};
+  trees.forEach(t => {
+    if (isDeadSpecies(t.sci, t.chi)) return;
+    const sci = isBlankName(t.sci) ? '' : s(t.sci);
+    const chi = isBlankName(t.chi) ? '' : s(t.chi);
+    if (!sci && !chi) return;
+    const k = sci + '|' + chi;
+    if (!pack[k]) pack[k] = { sci, chi, nos: [] };
+    pack[k].nos.push(t.no);
+  });
+  const groups = Object.values(pack).map(g => ({ ...g, nos: sortTreeNos(g.nos), n: g.nos.length }));
+  const typoBuckets = {}, binBuckets = {};
+  groups.forEach(g => {
+    if (!g.sci) return;
+    const tk = typoSciKey(g.sci) + '|' + typoChi(g.chi);
+    if (!typoBuckets[tk]) typoBuckets[tk] = [];
+    typoBuckets[tk].push(g);
+    if (isIndetSci(g.sci)) return;
+    const p = parseSci(g.sci);
+    const bin = p.binomial || '';
+    if (bin.split(' ').filter(Boolean).length < 2 || /\bspp?$/.test(bin)) return;
+    const bk = bin + '|' + typoChi(g.chi);
+    if (!binBuckets[bk]) binBuckets[bk] = [];
+    binBuckets[bk].push(g);
+  });
+  const issues = [];
+  groups.forEach(g => {
+    const notes = [];
+    let expected = '';
+    if (g.sci) {
+      expected = expectedSciCase(g.sci);
+      if (expected && expected !== g.sci) notes.push({ type: 'case', expected });
+      else expected = '';
+    }
+    const typoPeers = g.sci ? (typoBuckets[typoSciKey(g.sci) + '|' + typoChi(g.chi)] || []).filter(p => p.sci !== g.sci || p.chi !== g.chi) : [];
+    if (typoPeers.length) notes.push({ type: 'typo', peers: typoPeers });
+    let detailPeers = [];
+    if (g.sci && !isIndetSci(g.sci)) {
+      const p = parseSci(g.sci);
+      const bin = p.binomial || '';
+      if (bin.split(' ').filter(Boolean).length >= 2 && !/\bspp?$/.test(bin)) {
+        detailPeers = (binBuckets[bin + '|' + typoChi(g.chi)] || []).filter(o => typoSciKey(o.sci) !== typoSciKey(g.sci));
+      }
+    }
+    if (detailPeers.length) notes.push({ type: 'detail', peers: detailPeers });
+    if (notes.length) issues.push({ ...g, expected, notes });
+  });
+  issues.sort((a, b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()) || a.chi.localeCompare(b.chi, 'zh'));
+  return issues;
+}
+function writingNoteHtml(r) {
+  const italic = t => '<span class="sci">' + esc(t) + '</span>';
+  const peerLabel = p => italic(p.sci) + (p.chi ? ' ' + esc(p.chi) : '') + '（' + p.n + ' 棵）';
+  const parts = [];
+  (r.notes || []).forEach(n => {
+    if (n.type === 'case') parts.push('學名正確寫法為 ' + italic(n.expected) + '（屬名首字大階，第2個字細階）');
+    else if (n.type === 'typo') parts.push('與 ' + n.peers.map(peerLabel).join('、') + ' 屬大小寫、×／x 或中文異體等寫法差異，統計會分成不同品種');
+    else if (n.type === 'detail') parts.push('與 ' + n.peers.map(peerLabel).join('、') + ' 學名詳略不同（有／無 var.、subsp. 或作者），統計會分成不同品種');
+  });
+  return parts.join('。') + (parts.length ? '。' : '');
 }
 const ids = list => list.map(t => typeof t === 'string' ? esc(t) : esc(t.no)).join(', ') || '/';
 const joinNos = list => (list && list.length) ? list.map(t => typeof t === 'string' ? t : t.no).join(', ') : '/';
@@ -1547,6 +1680,7 @@ function run(file) {
     const remarkMismatches = collectRemarkMismatches(trees);
     const nameMismatches = collectNameMismatches(trees);
     const officialChecks = collectOfficialNameChecks(trees);
+    const writingChecks = collectSciWritingChecks(trees);
     const dropped = /duplicate|not in use|out of lot|outside|boundary/i;
     const active = trees.filter(t => (mode === 'construction' || !isRemoved(t.remarks)) && !dropped.test(t.remarks + ' ' + t.rec));
     const species = {};
@@ -1732,7 +1866,15 @@ ${totalLine}`;
         </table>
         <p>依據發展局綠化網「二維條碼樹木標籤」203 種市區常見樹木清單核對（Dead tree、Unidentified 除外）。清單以外的品種不會列為不符。報告仍按 Schedule 用字統計，不會自動改名。</p>
       </div>` : '';
-    const warnBox = speciesWarn + nameWarn + officialWarn + remarkWarn;
+    const writingWarn = writingChecks.length ? `
+      <div class="warn noprint">
+        <h3>請核對：${writingChecks.length} 項學名或中文名寫法（大小寫、符號或詳略差異）</h3>
+        <table><tr><th>Scientific Name</th><th>Chinese Name</th><th>棵數</th><th>Tree No.</th><th>核對結果</th></tr>
+        ${writingChecks.map(r => `<tr><td><span class="sci">${esc(r.sci)}</span></td><td>${esc(r.chi)}</td><td>${r.n}</td><td>${ids(r.nos)}</td><td>${writingNoteHtml(r)}</td></tr>`).join('')}
+        </table>
+        <p>學名正確大小寫為屬名首字大階、第2個字（種加詞）細階。報告仍按 Schedule 用字分開統計，不會自動改名。</p>
+      </div>` : '';
+    const warnBox = speciesWarn + nameWarn + writingWarn + officialWarn + remarkWarn;
     const privateBody = `
       <p class="noprint">
         <button type="button" id="btnWord">匯出 Word</button>
