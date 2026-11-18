@@ -350,12 +350,18 @@ function includedPhrase(indN, grpN, newN) {
   if (parts.length === 2) return 'The surveyed tree included ' + parts[0] + ' and ' + parts[1];
   return 'The surveyed tree included ' + parts[0] + ', ' + parts[1] + ' and ' + parts[2];
 }
+function qtyLabel(x) {
+  if (x.removed && x.removed === x.n) return x.n + ' (Removed)';
+  if (x.removed) return x.n + ' (' + x.removed + ' Removed)';
+  return String(x.n);
+}
 function speciesBreakdown(list) {
   const map = {};
   for (const t of list) {
     const k = t.sci + '|' + t.chi;
-    if (!map[k]) map[k] = { sci: t.sci, chi: t.chi, n: 0, nos: [] };
+    if (!map[k]) map[k] = { sci: t.sci, chi: t.chi, n: 0, removed: 0, nos: [] };
     map[k].n++;
+    if (isRemoved(t.remarks)) map[k].removed++;
     map[k].nos.push(t.no);
   }
   const rows = Object.values(map);
@@ -374,7 +380,7 @@ function sciHtml(sci, chi) {
 function speciesTableHtml(rows, total) {
   return `<table>
       <tr><th></th><th>Scientific Name</th><th>Chinese Name</th><th>Quantity</th></tr>
-      ${rows.map((x, i) => `<tr><td>${i + 1}</td><td>${sciHtml(x.sci, x.chi)}</td><td>${esc(x.chi)}</td><td>${x.n}</td></tr>`).join('')}
+      ${rows.map((x, i) => `<tr><td>${i + 1}</td><td>${sciHtml(x.sci, x.chi)}</td><td>${esc(x.chi)}</td><td>${esc(qtyLabel(x))}</td></tr>`).join('')}
       <tr><td>Total</td><td></td><td></td><td>${total}</td></tr></table>`;
 }
 function xmlEsc(v) {
@@ -491,7 +497,7 @@ function wTable(rows, total) {
     cell(0, wRun(String(i + 1))) +
     cell(1, wRun(x.sci, {i: isItalicSci(x.sci, x.chi)})) +
     cell(2, wRun(x.chi)) +
-    cell(3, wRun(String(x.n)))
+    cell(3, wRun(qtyLabel(x)))
   }</w:tr>`).join('');
   const totalRow = `<w:tr>${
     cell(0, wRun('Total', {b:true})) + cell(1, wRun('')) + cell(2, wRun('')) + cell(3, wRun(String(total), {b:true}))
@@ -599,7 +605,7 @@ function xTableRows(startTitle, rows, total) {
       {v: i + 1, s: 4, t: 'n'},
       {v: x.sci, s: isItalicSci(x.sci, x.chi) ? 5 : 4, t: 's'},
       {v: x.chi, s: 4, t: 's'},
-      {v: x.n, s: 4, t: 'n'}
+      {v: x.removed ? qtyLabel(x) : x.n, s: 4, t: x.removed ? 's' : 'n'}
     ]);
   });
   out.push([
@@ -783,17 +789,19 @@ function run(file) {
     }
     const remarkMismatches = collectRemarkMismatches(trees);
     const dropped = /duplicate|not in use|out of lot|outside|boundary/i;
-    const active = trees.filter(t => (mode === 'construction' || !isRemoved(t.remarks)) && !dropped.test(t.remarks + ' ' + t.rec));
+    const active = trees.filter(t => !dropped.test(t.remarks + ' ' + t.rec));
     const species = {};
     active.forEach(t => {
       const k = t.sci + '|' + t.chi;
-      species[k] = (species[k]||0) + 1;
+      if (!species[k]) species[k] = { n: 0, removed: 0 };
+      species[k].n++;
+      if (isRemoved(t.remarks)) species[k].removed++;
     });
-    const spRows = Object.entries(species).map(([k,n]) => { const [sci,chi]=k.split('|'); return {sci,chi,n}; })
+    const spRows = Object.entries(species).map(([k,v]) => { const [sci,chi]=k.split('|'); return {sci,chi,n:v.n,removed:v.removed}; })
       .sort((a,b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()));
-    const dom = Object.entries(species).sort((a,b)=>b[1]-a[1])[0];
+    const dom = Object.entries(species).sort((a,b)=>b[1].n-a[1].n)[0];
     const domSci = dom ? dom[0].split('|')[0] : 'N.A.';
-    const domRest = dom ? `${dom[0].split('|')[1]} (${dom[1]})`.trim() : '';
+    const domRest = dom ? `${dom[0].split('|')[1]} (${dom[1].n})`.trim() : '';
     const PRUNE = /crown cleaning|crown reduction|crown raising|crown thinning|pruning|selective|defective branch|dead (trunk|branch)|co-dominant|epicormic/i;
     const REM = /tree removal|\bfell(ing)?\b/i;
     const prune = active.filter(t => PRUNE.test(t.rec));
@@ -824,8 +832,9 @@ function run(file) {
     const newN = active.filter(t => classifyKind(t) === 'NEW').length;
     const indN = active.filter(t => classifyKind(t) === 'INDIVIDUAL').length;
     const grpN = active.filter(t => classifyKind(t) === 'GROUP').length;
-    const deadN = active.filter(t => isDeadSpecies(t.sci, t.chi)).length;
-    const aliveN = active.length - deadN;
+    const removedN = active.filter(t => isRemoved(t.remarks)).length;
+    const deadN = active.filter(t => isDeadSpecies(t.sci, t.chi) && !isRemoved(t.remarks)).length;
+    const aliveN = active.length - deadN - removedN;
     const speciesLive = spRows.filter(x => !isDeadSpecies(x.sci, x.chi));
     const speciesOrdered = speciesBreakdown(active);
     const joinAnd = arr => arr.length > 1 ? arr.slice(0,-1).join(', ') + ', and ' + arr[arr.length-1] : (arr[0] || 'the site');
@@ -836,10 +845,16 @@ function run(file) {
     const section33Intro = `A total of ${speciesLive.length} species were recorded during the survey and are represented throughout the survey area. No rare tree species, Registered Old and Valuable Trees (OVT), and Stonewall Trees were found during the inspection.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}
 Species composition of the survey area is summarized in the following table:`;
     const included = includedPhrase(indN, grpN, newN);
+    const comprise = removedN
+      ? (aliveN + ' alive trees, ' + deadN + ' dead trees and ' + removedN + ' removed trees. ')
+      : (aliveN + ' alive trees and ' + deadN + ' dead trees. ');
+    const totalLine = removedN
+      ? (aliveN + ' (Alive) + ' + deadN + ' (Dead Trees) + ' + removedN + ' (Removed) = ' + active.length + '.')
+      : (aliveN + ' (Alive) + ' + deadN + ' (Dead Trees) = ' + active.length + '.');
     const section4Body = `A tree survey has been carried out within the respective Project Area${projectPhrase}, to record the number of trees, species name, trunk diameters, height, crown spread, tree form, health condition.
-Based on the site inspection conducted prior to the commencement of works, total of ${active.length} nos. of surveyed tree. ${included ? included + ' comprising ' + aliveN + ' alive trees and ' + deadN + ' dead trees. ' : 'Comprising ' + aliveN + ' alive trees and ' + deadN + ' dead trees. '}No rare or protected species as listed under Cap.96 and Cap.586 were recorded.
+Based on the site inspection conducted prior to the commencement of works, total of ${active.length} nos. of surveyed tree. ${included ? included + ' comprising ' + comprise : 'Comprising ' + comprise}No rare or protected species as listed under Cap.96 and Cap.586 were recorded.
 Total Number of Trees Found On-Site:
-${aliveN} (Alive) + ${deadN} (Dead Trees) = ${active.length}.`;
+${totalLine}`;
     const groupBlocks = [
       ...groups.map(g => {
         const list = active.filter(t => isTG(t.zone) && normTG(t.zone) === g);
@@ -892,7 +907,7 @@ ${aliveN} (Alive) + ${deadN} (Dead Trees) = ${active.length}.`;
       <h2>Section 5<br>Tree Survey Findings</h2>
       <p>A total of ${active.length} trees and ${spRows.length} species were recorded. The dominant species is <span class="sci">${esc(domSci)}</span> ${esc(domRest)}.</p>
       <table><tr><th>Tree Species</th><th>Quantity</th></tr>
-      ${spRows.map(x => `<tr><td><span class="sci">${esc(x.sci)}</span> ${esc(x.chi)}</td><td>${x.n}</td></tr>`).join('')}
+      ${spRows.map(x => `<tr><td><span class="sci">${esc(x.sci)}</span> ${esc(x.chi)}</td><td>${esc(qtyLabel(x))}</td></tr>`).join('')}
       <tr><td>Total number of trees</td><td>${active.length}</td></tr></table>
       <p>TRIAGE colour summary</p>
       <table><tr><th>Colour</th><th>No. of trees</th><th>Tree No.</th></tr>
@@ -925,10 +940,10 @@ ${aliveN} (Alive) + ${deadN} (Dead Trees) = ${active.length}.`;
       <p>Other mitigation measures:<br>${ids(others)}</p>
       <h2>Form 1 Table (A) — Triage / Remedial (${formA.length})</h2>
       <table><tr><th>Tree No</th><th>Species</th><th>DBH</th><th>Height</th><th>Triage</th><th>Remedial</th></tr>
-      ${formA.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}</td><td>${esc(t.dbh)}</td><td>${esc(t.ht)}</td><td>${esc(t.triage)}</td><td>${esc(t.rec)}</td></tr>`).join('')}
+      ${formA.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}${isRemoved(t.remarks) ? ' (Removed)' : ''}</td><td>${esc(t.dbh)}</td><td>${esc(t.ht)}</td><td>${esc(t.triage)}</td><td>${esc(t.rec)}</td></tr>`).join('')}
       </table>
       <h2>Form 1 Table (B) — Other trees (${formB.length})</h2>
-      <p class="note">品種摘要見 Section 5。有效總數 ${active.length}（已排除 Removed）。TPRP ${tprpN}／新發現 ${newN}。工作表：${esc(usedSheet)}</p>
+      <p class="note">品種摘要見 Section 5。有效總數 ${active.length}${removedN ? '（' + removedN + ' 棵已標示 Removed）' : ''}。TPRP ${tprpN}／新發現 ${newN}。工作表：${esc(usedSheet)}</p>
     `;
     document.getElementById('out').innerHTML = `
       ${warnBox}
