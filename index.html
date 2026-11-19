@@ -1305,6 +1305,7 @@ function formTableRows(list) {
 function buildDocx(rep) {
   if (rep.mode === 'private') return buildPrivateDocx(rep);
   const blocks = [];
+  if (rep.groupIntro) blocks.push(wTextP(rep.groupIntro));
   blocks.push(wTextP('3.3 Species and OVT in approved TPRP', 'Heading2', {b:true}));
   blocks.push(wTextP(rep.section33Intro));
   blocks.push(wTable(rep.species, rep.total));
@@ -1559,7 +1560,8 @@ function buildPrivateXlsx(rep) {
 }
 function buildXlsx(rep) {
   if (rep.mode === 'private') return buildPrivateXlsx(rep);
-  const speciesRows = xTableRows('', rep.species, rep.total);
+  const intro = rep.groupIntro ? [[{v: rep.groupIntro, s: 0, t: 's'}], []] : [];
+  const speciesRows = [...intro, ...xTableRows('', rep.species, rep.total)];
   const s4rows = String(rep.section4Body).split('\n').map(line => [{v: line, s: 0, t: 's'}]);
   const tgRows = [];
   for (const g of rep.groupBlocks) {
@@ -1746,6 +1748,9 @@ function run(file) {
     const joinAnd = arr => arr.length > 1 ? arr.slice(0,-1).join(', ') + ', and ' + arr[arr.length-1] : (arr[0] || 'the site');
     const groupList = joinAnd(groups);
     const withList = joinAnd(groupsWithTrees.length ? groupsWithTrees : groups);
+    const groupIntro = groups.length
+      ? `This tree survey was conducted within ${groups.length} existing Tree Groups, of which ${groupsWithTrees.length} were found to contain trees. The surveyed Tree Groups are ${groupList}. The trees covered in this submission are located within existing planting areas in ${withList}, all of which fall within the site boundary.`
+      : '';
     const project = s(document.getElementById('project').value) || detectProject(raw, hr);
     const projectPhrase = project ? ' at ' + project : '';
     const section33Intro = `A total of ${speciesLive.length} species were recorded during the survey and are represented throughout the survey area. No rare tree species, Registered Old and Valuable Trees (OVT), and Stonewall Trees were found during the inspection.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}
@@ -1808,7 +1813,7 @@ ${totalLine}`;
     ];
     const formAView = formARows(formA);
     const formBView = formBGroups(formB);
-    const reportData = { mode, project, monthYear, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView };
+    const reportData = { mode, project, monthYear, groupIntro, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView };
     const tgSummaryHtml = groupBlocks.map(g =>
       `<h3>${esc(g.title)}</h3>` + (g.rows.length ? speciesTableHtml(g.rows, g.total) : '<p>No tree was found in this Tree Group.</p>')
     ).join('');
@@ -1818,6 +1823,7 @@ ${totalLine}`;
         <button type="button" id="btnExcel">匯出 Excel</button>
       </p>
       <div id="report">
+      ${groupIntro ? `<p>${esc(groupIntro)}</p>` : ''}
       <h2>3.3 Species and OVT in approved TPRP</h2>
       <p>${section33Intro.replace(/\n/g, '</p><p>')}</p>
       ${speciesTableHtml(speciesOrdered, active.length)}
