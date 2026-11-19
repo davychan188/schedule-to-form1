@@ -42,7 +42,7 @@
   <label><input type="radio" name="mode" value="construction" checked> Construction（3.3 及 Section 4）</label>
   <label><input type="radio" name="mode" value="private"> Private（不出 Section 4）</label>
 </div>
-<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單，並提示大小寫及寫法差異（不會自動改名）。</p>
+<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單，並提示大小寫及寫法差異（不會自動改名）。匯出 Excel 的 Sheet1、Sheet2 可直接由 A1 複製到 Form 1 的同名工作表。</p>
 <div id="out"></div>
 <script>
 const drop = document.getElementById('drop');
@@ -952,6 +952,13 @@ function formDate(v) {
   }
   return t;
 }
+function formDatePadded(v) {
+  const t = formDate(v);
+  const m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return t;
+  const pad = n => String(+n).padStart(2, '0');
+  return pad(m[1]) + '/' + pad(m[2]) + '/' + m[3];
+}
 function conditionLabel(raw) {
   const t = s(raw).toLowerCase();
   if (!t || /^(n\.?a\.?|-|\/)$/i.test(t)) return '';
@@ -1029,7 +1036,7 @@ function formBGroups(list) {
     map[k].n++;
     const h = numVal(t.ht);
     if (h != null) map[k].hts.push(h);
-    const lab = conditionLabel(t.health) || '-';
+    const lab = overallCondition(t) || '-';
     map[k].conds[lab] = (map[k].conds[lab] || 0) + 1;
   });
   return Object.values(map).sort((a, b) => a.species.toLowerCase().localeCompare(b.species.toLowerCase())).map(g => {
@@ -1045,6 +1052,68 @@ function formBGroups(list) {
       condition: entries.length ? entries[0][0] : '-'
     };
   });
+}
+function conditionEnglish(rawOrLabel) {
+  const lab = conditionLabel(rawOrLabel) || s(rawOrLabel);
+  const t = lab.toLowerCase();
+  if (!t || /^(n\.?a\.?|-|\/)$/i.test(t)) return '';
+  if (/dead\s*trees?|死樹|^dead$/.test(t)) return 'Dead';
+  if (/very\s*poor|十分差/.test(t)) return 'Very Poor';
+  if (/(^|\s)poor(\s|$)|差/.test(t) && !/fair|average|一般|very\s*poor|十分差/.test(t)) return 'Poor';
+  if (/fair|average|一般/.test(t)) return 'Fair';
+  if (/normal|good|正常/.test(t)) return 'Normal';
+  return '';
+}
+function triageEnglish(raw) {
+  const t = s(raw).toLowerCase();
+  if (/black|黑/.test(t)) return 'Black';
+  if (/red|紅/.test(t)) return 'Red';
+  if (/orange|橙/.test(t)) return 'Orange';
+  if (/yellow|黃/.test(t)) return 'Yellow';
+  return 'N.A.';
+}
+function remedialEnglish(raw) {
+  const t = s(raw);
+  if (!t || /^(n\.?a\.?|-|\/|no mitigation)$/i.test(t)) return '';
+  const k = t.toLowerCase();
+  if (/crown\s*clean|清理樹冠/.test(k)) return 'Crown cleaning';
+  if (/crown\s*thinn|樹冠疏理/.test(k)) return 'Crown thinning';
+  if (/crown\s*reduc|縮減樹冠/.test(k)) return 'Crown reduction';
+  if (/crown\s*rais|樹冠提升/.test(k)) return 'Crown raising';
+  if (/structural\s*prun|結構修剪/.test(k)) return 'Structural Pruning';
+  if (/cabl|brac|propp|纜索|拉纜|支柱/.test(k)) return 'Cabling, bracing or propping';
+  if (/pest|disease|mistletoe|病蟲害/.test(k)) return 'Pest/ disease control';
+  if (/form\s*2|表格\s*2/.test(k)) return 'Form 2 Assessment';
+  if (/remov|移除|砍伐/.test(k)) return 'Tree removal';
+  return t;
+}
+function pasteCells(vals) {
+  return vals.map(v => {
+    if (v === '' || v == null) return {v: '', s: 0, t: 's'};
+    if (typeof v === 'number' && Number.isFinite(v)) return {v, s: 0, t: 'n'};
+    return {v: s(v), s: 0, t: 's'};
+  });
+}
+function formPasteSheets(rep) {
+  const a = (rep.formA || []).map(t => pasteCells([
+    s(t.no), s(t.sci), s(t.chi),
+    numVal(t.dbh), numVal(t.ht), numVal(t.spread),
+    '', conditionEnglish(overallCondition(t)), '',
+    triageEnglish(t.triage), '',
+    remedialEnglish(t.rec),
+    formDatePadded(t.complete)
+  ]));
+  const b = formBGroups(rep.formB || []).map(g => pasteCells([
+    g.species,
+    g.n,
+    g.from === '' ? '' : g.from,
+    g.to === '' ? '' : g.to,
+    conditionEnglish(g.condition)
+  ]));
+  return [
+    xSheet('Sheet1', a, 13, [12, 28, 14, 10, 10, 10, 8, 14, 8, 12, 8, 28, 14]),
+    xSheet('Sheet2', b, 5, [36, 12, 12, 12, 14])
+  ];
 }
 
 const isTG = v => {
@@ -1555,7 +1624,8 @@ function buildPrivateXlsx(rep) {
     xSheet('Section 5', s5, 4, [10, 42, 28, 16]),
     xSheet('Section 6', s6, 3, [42, 16, 60]),
     xSheet('Form 1 A', sA, 11, [18, 8, 36, 10, 14, 16, 18, 22, 14, 32, 18]),
-    xSheet('Form 1 B', sB, 5, [36, 22, 16, 12, 20])
+    xSheet('Form 1 B', sB, 5, [36, 22, 16, 12, 20]),
+    ...formPasteSheets(rep)
   ]);
 }
 function buildXlsx(rep) {
@@ -1572,7 +1642,8 @@ function buildXlsx(rep) {
   const sheets = [
     xSheet('3.3 Species', speciesRows, 4),
     xSheet('Section 4', [[{v: 'SECTION 4', s: 2, t: 's'}], [{v: 'CONCLUSION', s: 2, t: 's'}], [], ...s4rows], 1),
-    xSheet('Tree Groups', tgRows.length ? tgRows : [[{v: 'No tree group', s: 0, t: 's'}]], 4)
+    xSheet('Tree Groups', tgRows.length ? tgRows : [[{v: 'No tree group', s: 0, t: 's'}]], 4),
+    ...formPasteSheets(rep)
   ];
   return packXlsx(sheets);
 }
