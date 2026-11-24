@@ -42,7 +42,7 @@
   <label><input type="radio" name="mode" value="construction" checked> Construction（3.3 及 Section 4）</label>
   <label><input type="radio" name="mode" value="private"> Private（不出 Section 4）</label>
 </div>
-<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單，並提示大小寫及寫法差異（不會自動改名）。亦會檢查品種是否列於第96章《林務規例》（第96A章）或第586章保護名單。匯出 Excel 的 Sheet1、Sheet2 可直接由 A1 複製到 Form 1 的同名工作表。</p>
+<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單，並提示大小寫及寫法差異（不會自動改名）。亦會檢查品種是否列於第96章《林務規例》（第96A章）或第586章保護名單。匯出 Excel 包含畫面各表及核對提示；Sheet1、Sheet2 可直接由 A1 複製到 Form 1 的同名工作表。</p>
 <div id="out"></div>
 <script>
 const drop = document.getElementById('drop');
@@ -1093,6 +1093,16 @@ function writingNoteHtml(r) {
   });
   return parts.join('。') + (parts.length ? '。' : '');
 }
+function writingNoteText(r) {
+  const peerLabel = p => p.sci + (p.chi ? ' ' + p.chi : '') + '（' + p.n + ' 棵）';
+  const parts = [];
+  (r.notes || []).forEach(n => {
+    if (n.type === 'case') parts.push('學名正確寫法為 ' + n.expected + '（屬名首字大階，第2個字細階）');
+    else if (n.type === 'typo') parts.push('與 ' + n.peers.map(peerLabel).join('、') + ' 屬大小寫、×／x 或中文異體等寫法差異，統計會分成不同品種');
+    else if (n.type === 'detail') parts.push('與 ' + n.peers.map(peerLabel).join('、') + ' 學名詳略不同（有／無 var.、subsp. 或作者），統計會分成不同品種');
+  });
+  return parts.join('。') + (parts.length ? '。' : '');
+}
 const ids = list => list.map(t => typeof t === 'string' ? esc(t) : esc(t.no)).join(', ') || '/';
 const joinNos = list => (list && list.length) ? list.map(t => typeof t === 'string' ? t : t.no).join(', ') : '/';
 function formSpeciesText(sci, chi) {
@@ -1298,6 +1308,91 @@ function formPasteSheets(rep) {
     xSheet('Sheet1', a, 13, [12, 28, 14, 10, 10, 10, 8, 14, 8, 12, 8, 28, 14]),
     xSheet('Sheet2', b, 5, [36, 12, 12, 12, 14])
   ];
+}
+function checkSheets(rep) {
+  const sheets = [];
+  const dead = rep.speciesRemarkDead || [];
+  if (dead.length) {
+    sheets.push(xSheet('Remarks死樹', [
+      [{v: '請核對：' + dead.length + ' 棵樹的 Tree species 不是 Dead tree，但 Remarks 寫了 Dead tree', s: 2, t: 's'}],
+      [],
+      ...xSimpleTable(
+        ['Tree No', 'Tree species', 'Remarks'],
+        dead.map(t => [t.no, [s(t.sci), s(t.chi)].filter(Boolean).join(' '), t.remarks])
+      )
+    ], 3, [14, 42, 50]));
+  }
+  const nm = rep.nameMismatches || { sameSci: [], similarChi: [] };
+  if ((nm.sameSci && nm.sameSci.length) || (nm.similarChi && nm.similarChi.length)) {
+    const rows = [];
+    rows.push([{v: '請核對：同一樹種的學名或中文名不一致', s: 2, t: 's'}]);
+    if (nm.sameSci.length) {
+      rows.push([]);
+      rows.push([{v: '同一學名但中文名不同', s: 2, t: 's'}]);
+      rows.push(...xSimpleTable(
+        ['Scientific Name', 'Chinese Name', '棵數', 'Tree No.'],
+        nm.sameSci.flatMap(g => g.variants.map(v => [v.sci, v.chi, v.n, joinNos(v.nos)]))
+      ));
+    }
+    if (nm.similarChi.length) {
+      nm.similarChi.forEach(g => {
+        rows.push([]);
+        rows.push([{v: '同一或相近中文名但學名不同（' + g.names.join('、') + '）', s: 2, t: 's'}]);
+        rows.push(...xSimpleTable(
+          ['Tree No.', 'Scientific Name', 'Chinese Name'],
+          g.trees.map(t => [t.no, t.sci, t.chi])
+        ));
+      });
+    }
+    sheets.push(xSheet('名稱不一致', rows, 4, [16, 36, 16, 50]));
+  }
+  const writing = rep.writingChecks || [];
+  if (writing.length) {
+    sheets.push(xSheet('寫法核對', [
+      [{v: '請核對：' + writing.length + ' 項學名或中文名寫法（大小寫、符號或詳略差異）', s: 2, t: 's'}],
+      [],
+      ...xSimpleTable(
+        ['Scientific Name', 'Chinese Name', '棵數', 'Tree No.', '核對結果'],
+        writing.map(r => [r.sci, r.chi, r.n, joinNos(r.nos), writingNoteText(r)])
+      )
+    ], 5, [28, 16, 8, 40, 60]));
+  }
+  const official = rep.officialChecks || [];
+  if (official.length) {
+    sheets.push(xSheet('官方清單不符', [
+      [{v: '請核對：' + official.length + ' 項學名或中文名與官方清單不符', s: 2, t: 's'}],
+      [],
+      ...xSimpleTable(
+        ['Scientific Name', 'Chinese Name', '棵數', 'Tree No.', '核對結果'],
+        official.map(r => [r.sci, r.chi, r.n, joinNos(r.nos), r.note || ''])
+      )
+    ], 5, [28, 16, 8, 40, 60]));
+  }
+  const prot = rep.protectedChecks || [];
+  if (prot.length) {
+    sheets.push(xSheet('保護樹種', [
+      [{v: '請核對：' + prot.length + ' 項品種列於第96章或第586章保護名單', s: 2, t: 's'}],
+      [],
+      ...xSimpleTable(
+        ['Scientific Name', 'Chinese Name', '棵數', 'Tree No.', '法例', '名單記載'],
+        prot.map(r => [r.sci, r.chi, r.n, joinNos(r.nos), r.ordinances, r.listed])
+      )
+    ], 6, [28, 16, 8, 40, 28, 50]));
+  }
+  const remarks = rep.remarkMismatches || [];
+  if (remarks.length) {
+    const nonstandard = remarks.filter(r => r.type !== 'exact').length;
+    const title = '全部 Remarks（' + remarks.length + ' 項用字' + (nonstandard ? '，其中 ' + nonstandard + ' 項不是標準 description' : '') + '）';
+    sheets.push(xSheet('Remarks用字', [
+      [{v: title, s: 2, t: 's'}],
+      [],
+      ...xSimpleTable(
+        ['Remarks 用字', '棵數', 'Tree No.'],
+        remarks.map(r => [r.item, r.nos.length, joinNos(r.nos)])
+      )
+    ], 3, [50, 8, 60]));
+  }
+  return sheets;
 }
 
 const isTG = v => {
@@ -1809,6 +1904,7 @@ function buildPrivateXlsx(rep) {
     xSheet('Section 6', s6, 3, [42, 16, 60]),
     xSheet('Form 1 A', sA, 11, [18, 8, 36, 10, 14, 16, 18, 22, 14, 32, 18]),
     xSheet('Form 1 B', sB, 5, [36, 22, 16, 12, 20]),
+    ...checkSheets(rep),
     ...formPasteSheets(rep)
   ]);
 }
@@ -1827,6 +1923,7 @@ function buildXlsx(rep) {
     xSheet('3.3 Species', speciesRows, 4),
     xSheet('Section 4', [[{v: 'SECTION 4', s: 2, t: 's'}], [{v: 'CONCLUSION', s: 2, t: 's'}], [], ...s4rows], 1),
     xSheet('Tree Groups', tgRows.length ? tgRows : [[{v: 'No tree group', s: 0, t: 's'}]], 4),
+    ...checkSheets(rep),
     ...formPasteSheets(rep)
   ];
   return packXlsx(sheets);
@@ -2069,7 +2166,7 @@ ${totalLine}`;
     ];
     const formAView = formARows(formA);
     const formBView = formBGroups(formB);
-    const reportData = { mode, project, monthYear, groupIntro, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView };
+    const reportData = { mode, project, monthYear, groupIntro, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView, speciesRemarkDead, nameMismatches, writingChecks, officialChecks, protectedChecks, remarkMismatches };
     const tgSummaryHtml = groupBlocks.map(g =>
       `<h3>${esc(g.title)}</h3>` + (g.rows.length ? speciesTableHtml(g.rows, g.total) : '<p>No tree was found in this Tree Group.</p>')
     ).join('');
