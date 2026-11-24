@@ -42,7 +42,7 @@
   <label><input type="radio" name="mode" value="construction" checked> Construction（3.3 及 Section 4）</label>
   <label><input type="radio" name="mode" value="private"> Private（不出 Section 4）</label>
 </div>
-<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單，並提示大小寫及寫法差異（不會自動改名）。匯出 Excel 的 Sheet1、Sheet2 可直接由 A1 複製到 Form 1 的同名工作表。</p>
+<p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單，並提示大小寫及寫法差異（不會自動改名）。亦會檢查品種是否列於第96章《林務規例》（第96A章）或第586章保護名單。匯出 Excel 的 Sheet1、Sheet2 可直接由 A1 複製到 Form 1 的同名工作表。</p>
 <div id="out"></div>
 <script>
 const drop = document.getElementById('drop');
@@ -846,6 +846,190 @@ function officialNameNoteHtml(r) {
     note += '。「' + esc(r.chi) + '」接近清單中的' + r.similar.map(h => '「' + esc(h.alias) + '」（' + italic(h.o.label) + '）').join('、');
   }
   return note;
+}
+
+/* Protected-plant lists for the Cap. 96 / Cap. 586 warning (on-screen only; does not change reports).
+   Cap. 96A Forestry Regulations, reg. 2 — plant list under Forests and Countryside Ordinance (Cap. 96) s.3.
+   Sources: official Chinese text of Cap. 96A reg. 2 (27 taxa; last plant-list amendment L.N. 135 of 1993);
+   e-Legislation verified copy 22 Dec 2021 (fine wording only); Development Bureau Greening page
+   "Conserving the Rare and Endangered Flora"; AFCD Forestry Regulations pages;
+   FAOLEX text of Cap. 96A. Chinese common names in the law are "for information only".
+   Cap. 586: HK Herbarium Appendix 3 "Native Plants which are protected under Cap. 586" (7 taxa);
+   plus a curated tree / woody / cycad subset of Cap. 586 Schedule 1 (CITES) that commonly appears
+   in HK tree surveys: Aquilaria spp., Cycadaceae spp., Zamiaceae spp. (AFCD "Endangered Plants"
+   pamphlet lists cycads). Not a full check of Cap. 586 Schedule 1 (thousands of orchids, cacti, etc.),
+   except Orchidaceae is included because it is on both Cap. 96A and the Herbarium native list.
+   Synonyms: legal / Greening / AFCD Shing Mun Arboretum (2025) names, plus widely used current
+   combinations needed for matching (documented on each alias). */
+const MAGNOLIACEAE_GENERA = [
+  "magnolia","liriodendron","michelia","manglietia","talauma","alcimandra","paramichelia",
+  "tsoongiodendron","parakmeria","yulania","houpoea","oyama","elmerrillia","aromadendron","kmeria",
+  "pachylarnax","woonyoungia","dugandiodendron","magnoliaceae"
+];
+const CYATHEACEAE_GENERA = [
+  "cyathea","alsophila","gymnosphaera","sphaeropteris","cnemidaria","trichipteris","alsophilum","cyatheaceae"
+];
+const CYCADACEAE_GENERA = ["cycas","epicycas","cycadaceae"];
+const ZAMIACEAE_GENERA = [
+  "zamia","encephalartos","dioon","ceratozamia","macrozamia","lepidozamia","bowenia","microcycas",
+  "stangeria","chigua","zamiaceae"
+];
+/* Hong Kong-recorded and commonly cultivated orchid genera; not every orchid genus worldwide. */
+const ORCHIDACEAE_GENERA = [
+  "acampe","acanthephippium","aerangis","aerides","anacamptis","angraecum","anoectochilus","ansellia",
+  "anthogonium","aphyllorchis","apostasia","appendicula","arachnis","aranda","arrhenchona","arundina",
+  "ascocenda","ascocentrum","bletilla","brassavola","brassia","bromheadia","bulbophyllum","cadetia",
+  "calanthe","catasetum","cattleya","ceratostylis","cheirostylis","chiloschista","chrysoglossum",
+  "cleisostoma","cochlioda","coelogyne","collabium","coryanthes","corybas","corymborkis","crepidium",
+  "cryptostylis","cycnoches","cymbidium","cypripedium","dactylorhiza","dendrobium","dienia","didymoplexis",
+  "diploprora","disa","doritaenopsis","doritis","encyclia","epidendrum","epigeneium","epipogium","eria",
+  "erythrodes","eulophia","flickingeria","galeandra","galeola","gastrochilus","gastrodia","geodorum",
+  "gongora","goodyera","grammatophyllum","guarianthe","gymnadenia","habenaria","herminium","hetaeria",
+  "himantoglossum","hippeophyllum","holcoglossum","huntleya","kingidium","lecanorchis","liparis","ludisia",
+  "luisia","lycaste","macodes","malaxis","maxillaria","miltonia","miltoniopsis","micropera","mokara",
+  "mormodes","neottia","nervilia","oberonia","odontoglossum","oncidium","ophrys","orchis","orchidaceae",
+  "ornithochilus","paphiopedilum","papilionanthe","pelatantheria","peristylus","pescatorea","phaius",
+  "phalaenopsis","pholidota","phragmipedium","pinalia","platanthera","pleione","podochilus","polystachya",
+  "pomatocalpa","ponerorchis","porpax","renanthera","rhynchostylis","robiquetia","satyrium","serapias",
+  "sobralia","spathoglottis","spiranthes","stanhopea","stenoglottis","stereochilus","tainia","thelasis",
+  "thecopus","thrixspermum","thunia","tolumnia","trichoglottis","tropidia","tuberolabium","uncifera",
+  "vanda","vandopsis","vanilla","vuylstekeara","yoania","zeuxine","zygopetalum"
+];
+const PROTECTED_TAXA = [
+  /* Cap. 96A reg. 2, items 1–27. listedSci / listedChi follow the legal instrument. */
+  {cap96:true, cap586:false, level:"species", sci:"Ailanthus fordii", chi:["福氏臭椿","常綠臭椿"], listedSci:"Ailanthus fordii", listedChi:"福氏臭椿"},
+  {cap96:true, cap586:false, level:"species", sci:"Amentotaxus argotaenia", chi:["穗花杉"], listedSci:"Amentotaxus argotaenia", listedChi:"穗花杉"},
+  {cap96:true, cap586:false, level:"species", sci:"Angiopteris evecta", sciAliases:["Angiopteris fokiensis"], chi:["觀音座蓮"], listedSci:"Angiopteris evecta", listedChi:"觀音座蓮"}, /* Greening: A. fokiensis, currently known as A. evecta; legal name is evecta */
+  {cap96:true, cap586:false, level:"species", sci:"Aristolochia tagala", chi:["印度馬兜鈴"], listedSci:"Aristolochia tagala", listedChi:"印度馬兜鈴"},
+  {cap96:true, cap586:false, level:"species", sci:"Asplenium nidus", chi:["雀巢芒"], listedSci:"Asplenium nidus", listedChi:"雀巢芒"},
+  {cap96:true, cap586:false, level:"genus", genus:"camellia", chi:["各種茶花"], listedSci:"Camellia species", listedChi:"各種茶花"},
+  {cap96:true, cap586:true, level:"family", family:"cyatheaceae", genera:CYATHEACEAE_GENERA, chi:["桫欏科植物"], listedSci:"Cyatheaceae species", listedChi:"桫欏科植物", listedSci586:"Cyatheaceae (All Species)"},
+  {cap96:true, cap586:false, level:"species", sci:"Dendrobenthamia hongkongensis", sciAliases:["Cornus hongkongensis"], chi:["香港四照花"], listedSci:"Dendrobenthamia hongkongensis", listedChi:"香港四照花"}, /* Cornus hongkongensis is the combination used in some floras */
+  {cap96:true, cap586:false, level:"species", sci:"Drosera peltata", sciAliases:["Drosera peltata var. glabrata"], chi:["茅膏菜"], listedSci:"Drosera peltata", listedChi:"茅膏菜"}, /* Greening lists var. glabrata */
+  {cap96:true, cap586:false, level:"species", sci:"Enkianthus quinqueflorus", chi:["吊鐘","吊鐘花"], listedSci:"Enkianthus quinqueflorus", listedChi:"吊鐘"}, /* AFCD Shing Mun 2025 also 吊鐘花 */
+  {cap96:true, cap586:false, level:"genus", genus:"illicium", chi:["各種八角"], listedSci:"Illicium species", listedChi:"各種八角"},
+  {cap96:true, cap586:false, level:"species", sci:"Illigera celebica", sciAliases:["Illigera platyandra"], chi:["青藤"], listedSci:"Illigera celebica (= Illigera platyandra)", listedChi:"青藤"},
+  {cap96:true, cap586:false, level:"species", sci:"Impatiens hongkongensis", chi:["香港鳳仙"], listedSci:"Impatiens hongkongensis", listedChi:"香港鳳仙"},
+  {cap96:true, cap586:false, level:"species", sci:"Iris speculatrix", chi:["小花鳶尾"], listedSci:"Iris speculatrix", listedChi:"小花鳶尾"},
+  {cap96:true, cap586:false, level:"species", sci:"Keteleeria fortunei", chi:["油杉"], listedSci:"Keteleeria fortunei", listedChi:"油杉"},
+  {cap96:true, cap586:false, level:"genus", genus:"lagerstroemia", chi:["各種紫薇"], listedSci:"Lagerstroemia species", listedChi:"各種紫薇"},
+  {cap96:true, cap586:false, level:"species", sci:"Lilium brownii", chi:["淡紫百合"], listedSci:"Lilium brownii", listedChi:"淡紫百合"},
+  {cap96:true, cap586:false, level:"family", family:"magnoliaceae", genera:MAGNOLIACEAE_GENERA, chi:["木蘭科植物"], listedSci:"Magnoliaceae species", listedChi:"木蘭科植物"},
+  {cap96:true, cap586:true, level:"genus", genus:"nepenthes", chi:["豬籠草"], listedSci:"Nepenthes species", listedChi:"豬籠草", listedSci586:"Nepenthes mirabilis"}, /* 96A: genus; Herbarium Cap. 586 native list: N. mirabilis; CITES: Nepenthes spp. */
+  {cap96:true, cap586:true, level:"family", family:"orchidaceae", genera:ORCHIDACEAE_GENERA, chi:["各種蘭花","蘭科植物"], listedSci:"Orchidaceae species", listedChi:"各種蘭花", listedSci586:"Orchidaceae (All Species)", listedChi586:"蘭科植物"},
+  {cap96:true, cap586:false, level:"species", sci:"Pavetta hongkongensis", chi:["茜木","香港大沙葉"], listedSci:"Pavetta hongkongensis", listedChi:"茜木"}, /* AFCD Shing Mun 2025: 香港大沙葉(茜木) */
+  {cap96:true, cap586:false, level:"species", sci:"Platycodon grandiflorum", sciAliases:["Platycodon grandiflorus","Platycodon grandiflors"], chi:["桔梗"], listedSci:"Platycodon grandiflorum", listedChi:"桔梗"}, /* Greening typo "grandiflors"; botanical grandiflorus */
+  {cap96:true, cap586:false, level:"species", sci:"Rehderodendron kwangtungense", chi:["廣東木瓜紅"], listedSci:"Rehderodendron kwangtungense", listedChi:"廣東木瓜紅"},
+  {cap96:true, cap586:false, level:"genus", genus:"rhododendron", chi:["各種杜鵑"], listedSci:"Rhododendron species", listedChi:"各種杜鵑"},
+  {cap96:true, cap586:false, level:"species", sci:"Rhodoleia championi", sciAliases:["Rhodoleia championii"], chi:["紅苞木","紅花荷","吊鐘王"], listedSci:"Rhodoleia championi", listedChi:"紅苞木"}, /* Law: championi; 203 list / AFCD: championii, 紅花荷、吊鐘王 */
+  {cap96:true, cap586:false, level:"species", sci:"Tutcheria spectabilis", sciAliases:["Pyrenaria spectabilis"], chi:["石筆木"], listedSci:"Tutcheria spectabilis", listedChi:"石筆木"}, /* AFCD Shing Mun 2025 uses Pyrenaria spectabilis */
+  {cap96:true, cap586:false, level:"species", sci:"Schoepfia chinensis", chi:["青皮樹"], listedSci:"Schoepfia chinensis", listedChi:"青皮樹"},
+  /* Cap. 586 only (Herbarium Appendix 3 and/or curated CITES tree-woody subset) */
+  {cap96:false, cap586:true, level:"genus", genus:"aquilaria", chi:["土沉香","牙香樹","白木香"], listedSci:"Aquilaria species", listedChi:"土沉香；香港原生種為 Aquilaria sinensis"},
+  {cap96:false, cap586:true, level:"species", sci:"Cibotium barometz", chi:["金毛狗","金毛狗脊"], listedSci:"Cibotium barometz", listedChi:"金毛狗（金毛狗脊）"},
+  {cap96:false, cap586:true, level:"genus", genus:"dalbergia", chi:["黃檀屬植物"], listedSci:"Dalbergia species", listedChi:"黃檀屬植物"},
+  {cap96:false, cap586:true, level:"species", sci:"Euphorbia atoto", chi:["濱海大戟"], listedSci:"Euphorbia atoto", listedChi:"濱海大戟"},
+  {cap96:false, cap586:true, level:"family", family:"cycadaceae", genera:CYCADACEAE_GENERA, chi:["蘇鐵科植物","蘇鐵"], listedSci:"Cycadaceae species", listedChi:"蘇鐵科植物"},
+  {cap96:false, cap586:true, level:"family", family:"zamiaceae", genera:ZAMIACEAE_GENERA, chi:["澤米鐵科植物","澤米鐵"], listedSci:"Zamiaceae species", listedChi:"澤米鐵科植物"}
+];
+
+function sciMatchesProtected(sci, taxon) {
+  if (isBlankName(sci)) return false;
+  const p = parseSci(sci);
+  const genus = (p.parts[0] || '').toLowerCase();
+  if (!genus) return false;
+  if (taxon.level === 'family') {
+    const fam = (taxon.family || '').toLowerCase();
+    if (genus === fam) return true;
+    return (taxon.genera || []).some(g => g === genus);
+  }
+  if (taxon.level === 'genus') {
+    return genus === (taxon.genus || '').toLowerCase();
+  }
+  const listed = [taxon.sci].concat(taxon.sciAliases || []);
+  return listed.some(name => {
+    const b = parseSci(name);
+    if (!p.core || !b.core) return false;
+    if (p.core === b.core) return true;
+    return !!(p.binomial && b.binomial && p.binomial === b.binomial);
+  });
+}
+function chiMatchesProtected(chi, taxon) {
+  if (isBlankName(chi)) return false;
+  const key = typoChi(chi);
+  if (!key) return false;
+  return (taxon.chi || []).some(alias => typoChi(alias) === key);
+}
+function ordinanceLabel(taxon) {
+  const parts = [];
+  if (taxon.cap96) parts.push('第96章（第96A章）');
+  if (taxon.cap586) parts.push('第586章');
+  return parts.join('、');
+}
+function listedNameLabel(taxon) {
+  const bits = [];
+  if (taxon.cap96) bits.push((taxon.listedSci || taxon.sci || '') + '（' + (taxon.listedChi || '') + '）');
+  if (taxon.cap586) {
+    const sci586 = taxon.listedSci586 || taxon.listedSci || taxon.sci || '';
+    const chi586 = taxon.listedChi586 || taxon.listedChi || '';
+    const label = sci586 + '（' + chi586 + '）';
+    if (!bits.includes(label)) bits.push(label);
+  }
+  return bits.join('；');
+}
+function collectProtectedSpeciesChecks(trees) {
+  const groups = {};
+  trees.forEach(t => {
+    if (isDeadSpecies(t.sci, t.chi)) return;
+    const sci = isBlankName(t.sci) ? '' : s(t.sci);
+    const chi = isBlankName(t.chi) ? '' : s(t.chi);
+    if (!sci && !chi) return;
+    const k = sci + '|' + chi;
+    if (!groups[k]) groups[k] = { sci, chi, nos: [] };
+    groups[k].nos.push(t.no);
+  });
+  const issues = [];
+  Object.values(groups).forEach(g => {
+    const hits = [];
+    const seen = new Set();
+    PROTECTED_TAXA.forEach(taxon => {
+      if (sciMatchesProtected(g.sci, taxon) || chiMatchesProtected(g.chi, taxon)) {
+        const id = (taxon.listedSci || taxon.sci || taxon.genus || taxon.family) + '|' + ordinanceLabel(taxon);
+        if (seen.has(id)) return;
+        seen.add(id);
+        hits.push(taxon);
+      }
+    });
+    if (!hits.length) return;
+    const cap96 = hits.some(h => h.cap96);
+    const cap586 = hits.some(h => h.cap586);
+    const ords = [];
+    if (cap96) ords.push('第96章（第96A章）');
+    if (cap586) ords.push('第586章');
+    const names = [];
+    const nameSeen = new Set();
+    hits.forEach(h => {
+      const label = listedNameLabel(h);
+      if (!nameSeen.has(label)) { nameSeen.add(label); names.push(label); }
+    });
+    issues.push({
+      sci: g.sci,
+      chi: g.chi,
+      nos: sortTreeNos(g.nos),
+      n: g.nos.length,
+      ordinances: ords.join('、'),
+      listed: names.join('；'),
+      cap96,
+      cap586
+    });
+  });
+  issues.sort((a, b) => b.n - a.n
+    || a.sci.toLowerCase().localeCompare(b.sci.toLowerCase())
+    || a.chi.localeCompare(b.chi, 'zh'));
+  return issues;
+}
+function protectedNoteHtml(r) {
+  return esc(r.listed);
 }
 function collectSciWritingChecks(trees) {
   const pack = {};
@@ -1753,6 +1937,7 @@ function run(file) {
     const remarkMismatches = collectRemarkMismatches(trees);
     const nameMismatches = collectNameMismatches(trees);
     const officialChecks = collectOfficialNameChecks(trees);
+    const protectedChecks = collectProtectedSpeciesChecks(trees);
     const writingChecks = collectSciWritingChecks(trees);
     const dropped = /duplicate|not in use|out of lot|outside|boundary/i;
     const active = trees.filter(t => (mode === 'construction' || !isRemoved(t.remarks)) && !dropped.test(t.remarks + ' ' + t.rec));
@@ -1951,7 +2136,15 @@ ${totalLine}`;
         </table>
         <p>學名正確大小寫為屬名首字大階、第2個字（種加詞）細階。報告仍按 Schedule 用字分開統計，不會自動改名。</p>
       </div>` : '';
-    const warnBox = speciesWarn + nameWarn + writingWarn + officialWarn + remarkWarn;
+    const protectedWarn = protectedChecks.length ? `
+      <div class="warn noprint">
+        <h3>請核對：${protectedChecks.length} 項品種列於第96章或第586章保護名單</h3>
+        <table><tr><th>Scientific Name</th><th>Chinese Name</th><th>棵數</th><th>Tree No.</th><th>法例</th><th>名單記載</th></tr>
+        ${protectedChecks.map(r => `<tr><td><span class="sci">${esc(r.sci)}</span></td><td>${esc(r.chi)}</td><td>${r.n}</td><td>${ids(r.nos)}</td><td>${esc(r.ordinances)}</td><td>${protectedNoteHtml(r)}</td></tr>`).join('')}
+        </table>
+        <p>此檢查比對《林務規例》（第96A章，屬第96章附屬法例）第2條所列植物，以及第586章下香港植物標本室所列原生植物，另包括常見於樹木調查的木本／蘇鐵類列明類群（沉香屬、黃檀屬、蘇鐵科、澤米鐵科等）。並非核對第586章附表1的全部動植物。名單以外的品種不會列出。報告仍按 Schedule 用字統計，不會自動改名。如需確定現行管制範圍，請再核對法例原文。</p>
+      </div>` : '';
+    const warnBox = speciesWarn + nameWarn + writingWarn + officialWarn + protectedWarn + remarkWarn;
     const privateBody = `
       <p class="noprint">
         <button type="button" id="btnWord">匯出 Word</button>
