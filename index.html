@@ -500,6 +500,13 @@ function bestDefect(item) {
   if (best.score >= 0.62) return { type: 'similar', official: best.official, score: best.score };
   return { type: 'none', official: best.score >= 0.5 ? best.official : '', score: best.score };
 }
+function compareRemarkWording(a, b) {
+  const left = String(a ?? '');
+  const right = String(b ?? '');
+  const cmp = left.toLowerCase().localeCompare(right.toLowerCase(), 'en');
+  if (cmp !== 0) return cmp;
+  return left.localeCompare(right, 'en');
+}
 function collectRemarkMismatches(trees) {
   const map = new Map();
   for (const t of trees) {
@@ -509,9 +516,8 @@ function collectRemarkMismatches(trees) {
       map.get(item).nos.push(t.no);
     }
   }
-  const order = { similar: 0, none: 1, exact: 2 };
   return [...map.values()].map(r => ({ ...r, nos: sortTreeNos(r.nos) }))
-    .sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9) || b.nos.length - a.nos.length || a.item.localeCompare(b.item));
+    .sort((a, b) => compareRemarkWording(a.item, b.item));
 }
 
 const POSTURE_LABELS = ['Bending', 'Leaning', 'Crooked'];
