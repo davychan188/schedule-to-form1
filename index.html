@@ -514,6 +514,46 @@ function collectRemarkMismatches(trees) {
     .sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9) || b.nos.length - a.nos.length || a.item.localeCompare(b.item));
 }
 
+const POSTURE_LABELS = ['Bending', 'Leaning', 'Crooked'];
+function postureTerms(item) {
+  const k = defectKey(item);
+  const exact = k.replace(/[.\s]+$/g, '').trim();
+  const found = new Set();
+  if (exact === 'bending') found.add('Bending');
+  if (exact === 'leaning') found.add('Leaning');
+  if (exact === 'crooked' || exact === 'crooks' || exact === 'crook') found.add('Crooked');
+  const official = DEFECT_EXACT.get(exact) || DEFECT_EXACT.get(k);
+  if (official) {
+    const ok = defectKey(official);
+    if (ok === 'bending') found.add('Bending');
+    if (ok === 'crooks') found.add('Crooked');
+    if (/\bleaning\b/.test(ok)) found.add('Leaning');
+  }
+  if (/\bbending\b/.test(k)) found.add('Bending');
+  if (/\bleaning\b/.test(k)) found.add('Leaning');
+  if (/\bcrooked\b/.test(k) || /\bcrooks?\b/.test(k)) found.add('Crooked');
+  return POSTURE_LABELS.filter(x => found.has(x));
+}
+function collectPostureConflicts(trees) {
+  const rows = [];
+  for (const t of trees) {
+    const seen = new Set();
+    for (const item of splitRemarks(t.remarks)) {
+      for (const term of postureTerms(item)) seen.add(term);
+    }
+    if (seen.size >= 2) {
+      const terms = POSTURE_LABELS.filter(x => seen.has(x));
+      rows.push({ no: t.no, sci: t.sci, chi: t.chi, remarks: t.remarks, terms });
+    }
+  }
+  return rows.sort((a, b) => {
+    const na = parseInt(String(a.no).replace(/\D/g, ''), 10) || 0;
+    const nb = parseInt(String(b.no).replace(/\D/g, ''), 10) || 0;
+    if (na !== nb) return na - nb;
+    return String(a.no).localeCompare(String(b.no), 'en', { numeric: true });
+  });
+}
+
 function sortTreeNos(nos) {
   return [...nos].sort((a, b) => {
     const na = parseInt(String(a).replace(/\D/g, ''), 10) || 0;
@@ -1379,6 +1419,17 @@ function checkSheets(rep) {
       )
     ], 6, [28, 16, 8, 40, 28, 50]));
   }
+  const posture = rep.postureConflicts || [];
+  if (posture.length) {
+    sheets.push(xSheet('Bending Leaning', [
+      [{v: '請核對：' + posture.length + ' 棵樹的 Remarks 同時出現 bending、leaning、crooked 當中兩個或三個', s: 2, t: 's'}],
+      [],
+      ...xSimpleTable(
+        ['Tree No', 'Tree species', 'Remarks', '同時出現'],
+        posture.map(t => [t.no, [s(t.sci), s(t.chi)].filter(Boolean).join(' '), t.remarks, (t.terms || []).join(', ')])
+      )
+    ], 4, [14, 42, 50, 28]));
+  }
   const remarks = rep.remarkMismatches || [];
   if (remarks.length) {
     const nonstandard = remarks.filter(r => r.type !== 'exact').length;
@@ -2032,6 +2083,7 @@ function run(file) {
         complete: c.complete >= 0 ? r[c.complete] : '', status: c.status >= 0 ? s(r[c.status]) : '' });
     }
     const remarkMismatches = collectRemarkMismatches(trees);
+    const postureConflicts = collectPostureConflicts(trees);
     const nameMismatches = collectNameMismatches(trees);
     const officialChecks = collectOfficialNameChecks(trees);
     const protectedChecks = collectProtectedSpeciesChecks(trees);
@@ -2166,7 +2218,7 @@ ${totalLine}`;
     ];
     const formAView = formARows(formA);
     const formBView = formBGroups(formB);
-    const reportData = { mode, project, monthYear, groupIntro, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView, speciesRemarkDead, nameMismatches, writingChecks, officialChecks, protectedChecks, remarkMismatches };
+    const reportData = { mode, project, monthYear, groupIntro, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView, speciesRemarkDead, nameMismatches, writingChecks, officialChecks, protectedChecks, remarkMismatches, postureConflicts };
     const tgSummaryHtml = groupBlocks.map(g =>
       `<h3>${esc(g.title)}</h3>` + (g.rows.length ? speciesTableHtml(g.rows, g.total) : '<p>No tree was found in this Tree Group.</p>')
     ).join('');
@@ -2208,6 +2260,14 @@ ${totalLine}`;
         </table>` : ''}
         <p>報告仍按 Schedule 的用字分開統計；請在 Schedule 統一名稱。</p>
       </div>` : '';
+    const postureWarn = postureConflicts.length ? `
+      <div class="warn noprint">
+        <h3>請核對：${postureConflicts.length} 棵樹的 Remarks 同時出現 bending、leaning、crooked 當中兩個或三個</h3>
+        <table><tr><th>Tree No</th><th>Tree species</th><th>Remarks</th><th>同時出現</th></tr>
+        ${postureConflicts.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}</td><td>${esc(t.remarks)}</td><td>${esc((t.terms || []).join(', '))}</td></tr>`).join('')}
+        </table>
+        <p>同一棵樹的 Remarks 同時寫了 bending、leaning、crooked 當中兩個或三個；報告用字及統計不會自動更改。</p>
+      </div>` : '';
     const remarkNonstandard = remarkMismatches.filter(r => r.type !== 'exact').length;
     const remarkWarn = remarkMismatches.length ? `
       <div class="warn noprint">
@@ -2241,7 +2301,7 @@ ${totalLine}`;
         </table>
         <p>此檢查比對《林務規例》（第96A章，屬第96章附屬法例）第2條所列植物，以及第586章下香港植物標本室所列原生植物，另包括常見於樹木調查的木本／蘇鐵類列明類群（沉香屬、黃檀屬、蘇鐵科、澤米鐵科等）。並非核對第586章附表1的全部動植物。名單以外的品種不會列出。報告仍按 Schedule 用字統計，不會自動改名。如需確定現行管制範圍，請再核對法例原文。</p>
       </div>` : '';
-    const warnBox = speciesWarn + nameWarn + writingWarn + officialWarn + protectedWarn + remarkWarn;
+    const warnBox = speciesWarn + nameWarn + writingWarn + officialWarn + protectedWarn + postureWarn + remarkWarn;
     const privateBody = `
       <p class="noprint">
         <button type="button" id="btnWord">匯出 Word</button>
