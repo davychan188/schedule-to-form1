@@ -1017,6 +1017,7 @@ function listedNameLabel(taxon) {
   }
   return bits.join('；');
 }
+const PROTECTED_CHECK_NOTE = '此檢查比對《林務規例》（第96A章，屬第96章附屬法例）第2條所列植物，以及第586章下香港植物標本室所列原生植物，另包括常見於樹木調查的木本／蘇鐵類列明類群（沉香屬、黃檀屬、蘇鐵科、澤米鐵科等）。並非核對第586章附表1的全部動植物。第96A章第2條部分項目按整個屬或科列明（例如 Lagerstroemia species／各種紫薇、Magnoliaceae species／木蘭科植物），故常見栽培樹種亦會列出。根據第3條，第2條不適用於在香港以外地方生長的植物，亦不適用於在根據租契、特許或許可或憑藉任何條例而持有的從政府取得的土地上生長的植物。檢查不會自動判斷是否符合豁免。名單以外的品種不會列出。報告仍按 Schedule 用字統計，不會自動改名。如需確定現行管制範圍，請再核對法例原文。';
 function collectProtectedSpeciesChecks(trees) {
   const groups = {};
   trees.forEach(t => {
@@ -1416,7 +1417,9 @@ function checkSheets(rep) {
       ...xSimpleTable(
         ['Scientific Name', 'Chinese Name', '棵數', 'Tree No.', '法例', '名單記載'],
         prot.map(r => [r.sci, r.chi, r.n, joinNos(r.nos), r.ordinances, r.listed])
-      )
+      ),
+      [],
+      [{v: PROTECTED_CHECK_NOTE, s: 0, t: 's'}]
     ], 6, [28, 16, 8, 40, 28, 50]));
   }
   const posture = rep.postureConflicts || [];
@@ -2299,7 +2302,7 @@ ${totalLine}`;
         <table><tr><th>Scientific Name</th><th>Chinese Name</th><th>棵數</th><th>Tree No.</th><th>法例</th><th>名單記載</th></tr>
         ${protectedChecks.map(r => `<tr><td><span class="sci">${esc(r.sci)}</span></td><td>${esc(r.chi)}</td><td>${r.n}</td><td>${ids(r.nos)}</td><td>${esc(r.ordinances)}</td><td>${protectedNoteHtml(r)}</td></tr>`).join('')}
         </table>
-        <p>此檢查比對《林務規例》（第96A章，屬第96章附屬法例）第2條所列植物，以及第586章下香港植物標本室所列原生植物，另包括常見於樹木調查的木本／蘇鐵類列明類群（沉香屬、黃檀屬、蘇鐵科、澤米鐵科等）。並非核對第586章附表1的全部動植物。名單以外的品種不會列出。報告仍按 Schedule 用字統計，不會自動改名。如需確定現行管制範圍，請再核對法例原文。</p>
+        <p>${PROTECTED_CHECK_NOTE}</p>
       </div>` : '';
     const warnBox = speciesWarn + nameWarn + writingWarn + officialWarn + protectedWarn + postureWarn + remarkWarn;
     const privateBody = `
