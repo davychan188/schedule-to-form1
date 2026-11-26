@@ -28,7 +28,11 @@
   .warn { background: #fff6e5; border: 1px solid #c47b00; color: #5c3a00; padding: 12px 14px; margin: 0 0 18px; border-radius: 8px; font-family: Arial, sans-serif; font-size: 14px; }
   .warn h3 { margin: 0 0 8px; font-size: 15px; color: #8a4b00; }
   .warn table th { background: #c47b00; }
-  @media print { #drop, .opts, .note, .noprint, .warn { display: none; } }
+  .photo-paths { font-family: Arial, sans-serif; margin: 0 0 16px; }
+  .photo-paths label { display: block; font-size: 14px; font-weight: bold; color: #1F4E79; margin: 0 0 6px; }
+  .photo-paths textarea { width: 100%; min-height: 110px; box-sizing: border-box; font-family: Consolas, "Courier New", monospace; font-size: 12px; padding: 8px; border: 1px solid #1F4E79; border-radius: 8px; resize: vertical; }
+  .photo-paths textarea.over { background: #e3eef8; }
+  @media print { #drop, .opts, .note, .noprint, .warn, .photo-paths, #photoPathsBox, #photoRemarksOut { display: none; } }
 </style>
 </head>
 <body>
@@ -43,15 +47,31 @@
   <label><input type="radio" name="mode" value="private"> Private（不出 Section 4）</label>
 </div>
 <p class="note">檔案只在你的瀏覽器處理，不會上載到伺服器。Remarks 會對照內建缺陷表；學名及中文名會對照發展局 203 種市區常見樹木清單，並提示大小寫及寫法差異（不會自動改名）。亦會檢查品種是否列於第96章《林務規例》（第96A章）或第586章保護名單。匯出 Excel 包含畫面各表及核對提示；Sheet1、Sheet2 可直接由 A1 複製到 Form 1 的同名工作表。</p>
+<div id="photoPathsBox" class="photo-paths noprint">
+  <label for="photoPaths">相片路徑</label>
+  <textarea id="photoPaths" placeholder="&quot;R:\Photos\T3_Wound on trunk (1).JPG&quot;&#10;&quot;R:\Photos\T3_Wound on trunk (2).JPG&quot;&#10;&quot;R:\Photos\TG-T0175_Co-dominant branches.jpg&quot;"></textarea>
+  <p class="note">檔案只在瀏覽器處理；只讀路徑／檔名，不會上載相片；不需先上傳 Excel。可貼 Windows 檔案總管「複製為路徑」，或拖放路徑清單 .txt。</p>
+</div>
+<div id="photoRemarksOut"></div>
 <div id="out"></div>
 <script>
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file');
+const photoPathsBox = document.getElementById('photoPathsBox');
+const photoPathsInput = document.getElementById('photoPaths');
 let lastFile = null;
+let lastReportData = null;
 drop.onclick = () => fileInput.click();
 drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
-drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) run(e.dataTransfer.files[0]); };
+drop.ondrop = e => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  if (isPhotoPathListFile(f)) { loadPhotoPathListFile(f); return; }
+  run(f);
+};
 fileInput.onchange = () => { if (fileInput.files[0]) run(fileInput.files[0]); };
 document.querySelectorAll('input[name=dead], input[name=mode]').forEach(el => {
   el.addEventListener('change', () => { if (lastFile) run(lastFile); });
@@ -59,6 +79,22 @@ document.querySelectorAll('input[name=dead], input[name=mode]').forEach(el => {
 ['project','extraGroups'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => { if (lastFile) run(lastFile); });
 });
+if (photoPathsInput) {
+  photoPathsInput.addEventListener('input', () => renderPhotoRemarks());
+  const bindPhotoDrop = el => {
+    if (!el) return;
+    el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });
+    el.addEventListener('dragleave', () => el.classList.remove('over'));
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove('over');
+      handlePhotoPathDrop(e.dataTransfer);
+    });
+  };
+  bindPhotoDrop(photoPathsBox);
+  bindPhotoDrop(photoPathsInput);
+}
 
 const s = v => String(v ?? '').replace(/[\u00a0\u200b\u200c\u200d\ufeff\u3000]/g, ' ').replace(/\s+/g, ' ').trim();
 const esc = v => s(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -3934,6 +3970,154 @@ function sortTreeNos(nos) {
     return String(a).localeCompare(String(b), 'en', { numeric: true });
   });
 }
+function uniqueTreeNos(nos) {
+  const sorted = sortTreeNos(nos);
+  return sorted.filter((n, i) => i === 0 || String(n) !== String(sorted[i - 1]));
+}
+const PHOTO_VIEW_TYPE_RE = /^(tag|whole\s*view|wholeview|whole|trunk\s*base|trunkbase|crown)$/i;
+const PHOTO_TRAILING_INDEX_RE = /\s*[\(（]\s*\d+\s*[\)）]\s*$/u;
+const PHOTO_TREE_RE = /^(TG-T\d+|T-\d+|T\d+[A-Za-z]?)(?:\s+\(\d+\))?(?:(_|[-–—]|[\s]+)(.*))?$/i;
+function isPhotoPathListFile(file) {
+  const name = file && file.name ? String(file.name) : '';
+  const type = file && file.type ? String(file.type) : '';
+  return /\.txt$/i.test(name) || type === 'text/plain';
+}
+function isSpreadsheetFile(file) {
+  const name = file && file.name ? String(file.name) : '';
+  return /\.xlsx?$/i.test(name);
+}
+function stripPhotoPathLine(line) {
+  let t = String(line == null ? '' : line).replace(/^\uFEFF/, '').trim();
+  if (!t) return '';
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
+    t = t.slice(1, -1).trim();
+  }
+  if (t.endsWith(',')) t = t.replace(/,+$/, '').trim();
+  return t;
+}
+function filenameFromPhotoPath(path) {
+  const parts = String(path || '').split(/[/\\]/);
+  return (parts[parts.length - 1] || '').trim().replace(/["']+$/, '');
+}
+function isStandardPhotoViewType(text) {
+  const k = String(text || '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return PHOTO_VIEW_TYPE_RE.test(k);
+}
+function parsePhotoFilename(name) {
+  const raw = String(name == null ? '' : name).trim();
+  if (!raw) return null;
+  const base = raw.replace(/\.[A-Za-z0-9]{1,8}$/i, '');
+  const m = base.match(PHOTO_TREE_RE);
+  if (!m) return null;
+  const treeNo = m[1];
+  const rest = (m[3] || '').replace(PHOTO_TRAILING_INDEX_RE, '').replace(/\s+/g, ' ').trim();
+  return { treeNo, rest, filename: raw };
+}
+function getPhotoPathsText() {
+  return photoPathsInput ? String(photoPathsInput.value || '') : '';
+}
+function analyzePhotoPaths(text) {
+  const lines = String(text == null ? '' : text).replace(/^\uFEFF/, '').split(/\r\n|\n|\r/);
+  const unparsed = [];
+  const map = new Map();
+  let photoCount = 0;
+  let skippedView = 0;
+  let noRemark = 0;
+  for (const raw of lines) {
+    const line = stripPhotoPathLine(raw);
+    if (!line) continue;
+    const filename = filenameFromPhotoPath(line);
+    const parsed = parsePhotoFilename(filename);
+    if (!parsed) {
+      unparsed.push(String(raw).replace(/^\uFEFF/, '').trim() || line);
+      continue;
+    }
+    photoCount++;
+    if (!parsed.rest) { noRemark++; continue; }
+    if (isStandardPhotoViewType(parsed.rest)) { skippedView++; continue; }
+    const items = splitRemarks(parsed.rest);
+    if (!items.length) { noRemark++; continue; }
+    for (const item of items) {
+      const m = bestDefect(item);
+      if (!map.has(item)) map.set(item, { item, nos: [], photos: 0, type: m.type });
+      const row = map.get(item);
+      row.nos.push(parsed.treeNo);
+      row.photos++;
+    }
+  }
+  const rows = [...map.values()].map(r => ({ ...r, nos: uniqueTreeNos(r.nos) }))
+    .sort((a, b) => compareRemarkWording(a.item, b.item));
+  return { rows, unparsed, photoCount, skippedView, noRemark };
+}
+function photoRemarksTitle(rows) {
+  const n = (rows || []).length;
+  const nonstandard = (rows || []).filter(r => r.type !== 'exact').length;
+  return '全部相片 Remarks（' + n + ' 項用字' + (nonstandard ? '，其中 ' + nonstandard + ' 項不是標準 description' : '') + '）';
+}
+function photoRemarksHtml(analysis) {
+  const a = analysis || analyzePhotoPaths(getPhotoPathsText());
+  const hasContent = a.rows.length || a.unparsed.length || a.photoCount;
+  if (!hasContent) return '';
+  const unparsedNote = a.unparsed.length
+    ? `<p>有 ${a.unparsed.length} 行未能辨識為樹相片檔名，沒有猜測：${a.unparsed.map(x => esc(x)).join('；')}</p>`
+    : '';
+  if (!a.rows.length) {
+    return `<div class="warn noprint" id="photoRemarksBox">
+        <h3>${esc(photoRemarksTitle(a.rows))}</h3>
+        <p>已讀 ${a.photoCount} 張相片路徑，沒有 Remarks 用字（標準角度或缺備註的檔名不會列入）。不需先上傳 Excel。</p>
+        ${unparsedNote}
+      </div>`;
+  }
+  const exportBtn = lastReportData ? '' : `<p><button type="button" id="btnPhotoExcel">匯出相片 Remarks Excel</button></p>`;
+  return `<div class="warn noprint" id="photoRemarksBox">
+      <h3>${esc(photoRemarksTitle(a.rows))}</h3>
+      <table><tr><th>Remarks 用字</th><th>棵數</th><th>張數</th><th>Tree No.</th></tr>
+      ${a.rows.map(r => `<tr><td>${esc(r.item)}</td><td>${r.nos.length}</td><td>${r.photos}</td><td>${ids(r.nos)}</td></tr>`).join('')}
+      </table>
+      <p>已由相片檔名列出 Remarks 用字（略過 Tag、Whole view、Trunk base、Crown；N.A. 除外）；符合標準的項目一併列出。按英文 A–Z 排序。不需先上傳 Excel。</p>
+      ${unparsedNote}
+      ${exportBtn}
+    </div>`;
+}
+function renderPhotoRemarks() {
+  const host = document.getElementById('photoRemarksOut');
+  if (!host) return;
+  const analysis = analyzePhotoPaths(getPhotoPathsText());
+  host.innerHTML = photoRemarksHtml(analysis);
+  const btn = document.getElementById('btnPhotoExcel');
+  if (btn) btn.onclick = () => exportPhotoRemarksExcel(analysis);
+}
+function loadPhotoPathListFile(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    if (photoPathsInput) photoPathsInput.value = String(ev.target.result || '');
+    renderPhotoRemarks();
+  };
+  reader.readAsText(file);
+}
+function handlePhotoPathDrop(dt) {
+  if (!dt) return;
+  const files = dt.files ? [...dt.files] : [];
+  const txt = files.find(isPhotoPathListFile);
+  if (txt) { loadPhotoPathListFile(txt); return; }
+  const names = files.filter(f => f && f.name && !isSpreadsheetFile(f)).map(f => f.name);
+  if (!names.length) return;
+  const existing = photoPathsInput ? String(photoPathsInput.value || '').replace(/\s+$/, '') : '';
+  const block = names.join('\n');
+  if (photoPathsInput) photoPathsInput.value = existing ? existing + '\n' + block : block;
+  renderPhotoRemarks();
+}
+function withPhotoRemarks(rep) {
+  const a = analyzePhotoPaths(getPhotoPathsText());
+  return Object.assign({}, rep || {}, { photoRemarkMismatches: a.rows, photoRemarkAnalysis: a });
+}
+function exportPhotoRemarksExcel(analysis) {
+  const a = analysis || analyzePhotoPaths(getPhotoPathsText());
+  if (!a.rows.length) return;
+  const sheets = [photoRemarkSheet(a.rows)];
+  downloadBytes(packXlsx(sheets), '相片Remarks用字.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
 function normSciName(sci) {
   return s(sci).toLowerCase().replace(/×/g, 'x').replace(/\./g, '');
 }
@@ -4831,7 +5015,22 @@ function checkSheets(rep) {
       )
     ], 3, [50, 8, 60]));
   }
+  const photoRemarks = rep.photoRemarkMismatches || [];
+  if (photoRemarks.length) {
+    sheets.push(photoRemarkSheet(photoRemarks));
+  }
   return sheets;
+}
+function photoRemarkSheet(rows) {
+  const title = photoRemarksTitle(rows);
+  return xSheet('相片Remarks用字', [
+    [{v: title, s: 2, t: 's'}],
+    [],
+    ...xSimpleTable(
+      ['Remarks 用字', '棵數', '張數', 'Tree No.'],
+      rows.map(r => [r.item, r.nos.length, r.photos, joinNos(r.nos)])
+    )
+  ], 4, [50, 8, 8, 60]);
 }
 
 const isTG = v => {
@@ -5623,7 +5822,7 @@ function exportWord(rep) {
   downloadBytes(buildDocx(rep), exportBasename(rep.project) + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 }
 function exportExcel(rep) {
-  downloadBytes(buildXlsx(rep), exportBasename(rep.project) + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  downloadBytes(buildXlsx(withPhotoRemarks(rep)), exportBasename(rep.project) + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 function detectProject(raw, hr) {
   const skip = /tree assessment schedule|initial tree survey|tree inventory|^nan$/i;
@@ -5852,6 +6051,7 @@ Species composition of the survey area is summarized in the following table:`;
     const formAView = formARows(formA);
     const formBView = formBGroups(formB);
     const reportData = { mode, project, monthYear, groupIntro, table1Intro, table1Origin, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView, speciesRemarkDead, nameMismatches, writingChecks, officialChecks, protectedChecks, originChecks, remarkMismatches, postureConflicts };
+    lastReportData = reportData;
     const tgSummaryHtml = groupBlocks.map(g =>
       `<h3>${esc(g.title)}</h3>` + (g.rows.length ? speciesTableHtml(g.rows, g.total) : '<p>No tree was found in this Tree Group.</p>')
     ).join('');
@@ -6008,6 +6208,7 @@ Species composition of the survey area is summarized in the following table:`;
     const btnExcel = document.getElementById('btnExcel');
     if (btnWord) btnWord.onclick = () => exportWord(reportData);
     if (btnExcel) btnExcel.onclick = () => exportExcel(reportData);
+    renderPhotoRemarks();
   };
   reader.readAsArrayBuffer(file);
 }
