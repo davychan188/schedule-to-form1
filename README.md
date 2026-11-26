@@ -6,12 +6,13 @@
 
 開啟：[https://davychan188.github.io/schedule-to-form1/](https://davychan188.github.io/schedule-to-form1/)
 
-把 Tree Assessment Schedule（`.xlsx` / `.xls`）拖進頁面，即可產生 Section 4 / 5 / 6 及 Form 1 Table (A)。亦可只在「相片路徑」欄貼上檔案總管「複製為路徑」的清單（不需先上傳 Excel），按英文 A–Z 列出相片 Remarks 用字分析。檔案只在瀏覽器處理，不會上載到伺服器。可用「列印 / 存 PDF」輸出。
+把 Tree Assessment Schedule（`.xlsx` / `.xls`）拖進頁面，即可產生 Section 4 / 5 / 6 及 Form 1 Table (A)。亦可只在「相片路徑」欄貼上檔案總管「複製為路徑」的清單（不需先上傳 Excel），按英文 A–Z 列出相片 Remarks 用字分析。同一棵樹若出現類似 defect 用字（例如 leaning 與 severely leaning），會作出提示，但不會自動改用字或統計。檔案只在瀏覽器處理，不會上載到伺服器。可用「列印 / 存 PDF」輸出。
 
 單元測試：
 
 ```bash
 node test-photo-remarks.js
+node test-similar-defects.js
 ```
 
 ## 桌面版（Python）

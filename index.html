@@ -32,7 +32,7 @@
   .photo-paths label { display: block; font-size: 14px; font-weight: bold; color: #1F4E79; margin: 0 0 6px; }
   .photo-paths textarea { width: 100%; min-height: 110px; box-sizing: border-box; font-family: Consolas, "Courier New", monospace; font-size: 12px; padding: 8px; border: 1px solid #1F4E79; border-radius: 8px; resize: vertical; }
   .photo-paths textarea.over { background: #e3eef8; }
-  @media print { #drop, .opts, .note, .noprint, .warn, .photo-paths, #photoPathsBox, #photoRemarksOut { display: none; } }
+  @media print { #drop, .opts, .note, .noprint, .warn, .photo-paths, #photoPathsBox, #photoRemarksOut, #similarDefectOut { display: none; } }
 </style>
 </head>
 <body>
@@ -53,6 +53,7 @@
   <p class="note">檔案只在瀏覽器處理；只讀路徑／檔名，不會上載相片；不需先上傳 Excel。可貼 Windows 檔案總管「複製為路徑」，或拖放路徑清單 .txt。</p>
 </div>
 <div id="photoRemarksOut"></div>
+<div id="similarDefectOut"></div>
 <div id="out"></div>
 <script>
 const drop = document.getElementById('drop');
@@ -3962,6 +3963,206 @@ function collectPostureConflicts(trees) {
   });
 }
 
+
+const SIMILAR_INTENSITY = new Set(['slightly','severely','minor','major','heavy','small','large','very','closeup']);
+const SIMILAR_PLURALS = {
+  branches: 'branch', branch: 'branch',
+  trunks: 'trunk', trunk: 'trunk',
+  cracks: 'crack', crack: 'crack',
+  wounds: 'wound', wound: 'wound',
+  roots: 'root', root: 'root',
+  leaves: 'leaf', leaf: 'leaf'
+};
+function normalizeRemarkForCompare(item) {
+  return defectKey(String(item == null ? '' : item).replace(PHOTO_TRAILING_INDEX_RE, ''));
+}
+function stemSimplePlural(w) {
+  const key = String(w || '');
+  if (SIMILAR_PLURALS[key]) return SIMILAR_PLURALS[key];
+  if (key.length > 3 && key.endsWith('s') && !/(ss|us|is)$/.test(key)) return key.slice(0, -1);
+  return key;
+}
+function contentTokens(item) {
+  return defectTokens(normalizeRemarkForCompare(item)).filter(w => !STOP.has(w));
+}
+function coreTokens(item) {
+  const toks = defectTokens(normalizeRemarkForCompare(item));
+  const out = [];
+  for (let i = 0; i < toks.length; i++) {
+    const w = toks[i];
+    if (w === 'closeup') continue;
+    if (w === 'close' && toks[i + 1] === 'up') { i++; continue; }
+    if (SIMILAR_INTENSITY.has(w)) continue;
+    if (STOP.has(w)) continue;
+    out.push(stemSimplePlural(w));
+  }
+  return out;
+}
+function isContiguousSubsequence(shortToks, longToks) {
+  if (!shortToks.length || shortToks.length > longToks.length) return false;
+  for (let i = 0; i <= longToks.length - shortToks.length; i++) {
+    let ok = true;
+    for (let j = 0; j < shortToks.length; j++) {
+      if (shortToks[j] !== longToks[i + j]) { ok = false; break; }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+function sameCoreTokens(a, b) {
+  const ca = coreTokens(a), cb = coreTokens(b);
+  if (!ca.length || !cb.length || ca.length !== cb.length) return false;
+  return ca.every((w, i) => w === cb[i]);
+}
+function isDifferentPosturePair(a, b) {
+  const pa = postureTerms(a);
+  const pb = postureTerms(b);
+  if (!pa.length || !pb.length) return false;
+  return pa.every(x => !pb.includes(x));
+}
+function areSimilarDefects(a, b) {
+  const ka = normalizeRemarkForCompare(a);
+  const kb = normalizeRemarkForCompare(b);
+  if (!ka || !kb || ka === kb) return false;
+  const ta = contentTokens(a), tb = contentTokens(b);
+  if (ta.length && tb.length && (isContiguousSubsequence(ta, tb) || isContiguousSubsequence(tb, ta))) return true;
+  return sameCoreTokens(a, b);
+}
+function uniqueRemarkItems(items) {
+  const map = new Map();
+  for (const item of items || []) {
+    const k = normalizeRemarkForCompare(item);
+    if (!k) continue;
+    if (!map.has(k)) map.set(k, item);
+  }
+  return [...map.values()];
+}
+function formatSimilarWordings(groups) {
+  return (groups || []).map(g => g.join(', ')).join('；');
+}
+function similarRemarkGroups(items) {
+  const uniq = uniqueRemarkItems(items);
+  const n = uniq.length;
+  const adj = Array.from({ length: n }, () => []);
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (!areSimilarDefects(uniq[i], uniq[j])) continue;
+      if (isDifferentPosturePair(uniq[i], uniq[j])) continue;
+      adj[i].push(j);
+      adj[j].push(i);
+    }
+  }
+  const seen = new Array(n).fill(false);
+  const groups = [];
+  for (let i = 0; i < n; i++) {
+    if (seen[i] || !adj[i].length) continue;
+    const stack = [i], group = [];
+    seen[i] = true;
+    while (stack.length) {
+      const u = stack.pop();
+      group.push(uniq[u]);
+      for (const v of adj[u]) if (!seen[v]) { seen[v] = true; stack.push(v); }
+    }
+    groups.push(group.sort(compareRemarkWording));
+  }
+  groups.sort((a, b) => compareRemarkWording(a[0], b[0]));
+  return groups;
+}
+function sortSimilarDefectRows(rows) {
+  return [...rows].sort((a, b) => {
+    const na = parseInt(String(a.no).replace(/\D/g, ''), 10) || 0;
+    const nb = parseInt(String(b.no).replace(/\D/g, ''), 10) || 0;
+    if (na !== nb) return na - nb;
+    return String(a.no).localeCompare(String(b.no), 'en', { numeric: true });
+  });
+}
+function collectSimilarDefects(trees) {
+  const rows = [];
+  for (const t of trees || []) {
+    const items = t.items || splitRemarks(t.remarks);
+    const groups = similarRemarkGroups(items);
+    if (!groups.length) continue;
+    rows.push({
+      no: t.no,
+      sci: t.sci,
+      chi: t.chi,
+      groups,
+      items: groups.reduce((acc, g) => acc.concat(g), []),
+      wordings: formatSimilarWordings(groups)
+    });
+  }
+  return sortSimilarDefectRows(rows);
+}
+function collectSimilarDefectsFromPhotoAnalysis(analysis) {
+  return collectSimilarDefects(analysis && analysis.treeItems ? analysis.treeItems : []);
+}
+function similarDefectTreeCount(scheduleRows, photoRows) {
+  return uniqueTreeNos([].concat(scheduleRows || [], photoRows || []).map(r => r.no)).length;
+}
+function similarDefectTitle(scheduleRows, photoRows) {
+  const n = similarDefectTreeCount(scheduleRows, photoRows);
+  return '請核對：' + n + ' 棵樹的 Remarks 同時出現類似 defect';
+}
+const SIMILAR_DEFECT_NOTE = '同一棵樹出現超過一項類似 defect；報告用字及統計不會自動更改。';
+function similarDefectWarnHtml(scheduleRows, photoRows) {
+  const sched = scheduleRows || [];
+  const photos = photoRows || [];
+  if (!sched.length && !photos.length) return '';
+  const both = sched.length && photos.length;
+  let body = '';
+  if (sched.length) {
+    if (both) body += '<p>Schedule Remarks</p>';
+    body += '<table><tr><th>Tree No.</th><th>Tree species</th><th>類似用字</th></tr>' +
+      sched.map(t => `<tr><td>${esc(t.no)}</td><td><span class="sci">${esc(t.sci)}</span> ${esc(t.chi)}</td><td>${esc(t.wordings)}</td></tr>`).join('') +
+      '</table>';
+  }
+  if (photos.length) {
+    if (both) body += '<p>相片路徑 Remarks</p>';
+    body += '<table><tr><th>Tree No.</th><th>類似用字</th></tr>' +
+      photos.map(t => `<tr><td>${esc(t.no)}</td><td>${esc(t.wordings)}</td></tr>`).join('') +
+      '</table>';
+  }
+  return `<div class="warn noprint" id="similarDefectBox">
+      <h3>${esc(similarDefectTitle(sched, photos))}</h3>
+      ${body}
+      <p>${SIMILAR_DEFECT_NOTE}</p>
+    </div>`;
+}
+function renderSimilarDefectWarnings(analysis) {
+  const host = document.getElementById('similarDefectOut');
+  if (!host) return;
+  const scheduleRows = (lastReportData && lastReportData.similarDefects) || [];
+  const photoRows = collectSimilarDefectsFromPhotoAnalysis(analysis || analyzePhotoPaths(getPhotoPathsText()));
+  host.innerHTML = similarDefectWarnHtml(scheduleRows, photoRows);
+}
+function similarDefectSheet(scheduleRows, photoRows) {
+  const sched = scheduleRows || [];
+  const photos = photoRows || [];
+  if (!sched.length && !photos.length) return null;
+  const both = sched.length && photos.length;
+  const rows = [[{v: similarDefectTitle(sched, photos), s: 2, t: 's'}]];
+  if (sched.length) {
+    rows.push([]);
+    if (both) rows.push([{v: 'Schedule Remarks', s: 2, t: 's'}]);
+    rows.push(...xSimpleTable(
+      ['Tree No.', 'Tree species', '類似用字'],
+      sched.map(t => [t.no, [s(t.sci), s(t.chi)].filter(Boolean).join(' '), t.wordings])
+    ));
+  }
+  if (photos.length) {
+    rows.push([]);
+    if (both) rows.push([{v: '相片路徑 Remarks', s: 2, t: 's'}]);
+    rows.push(...xSimpleTable(
+      ['Tree No.', '類似用字'],
+      photos.map(t => [t.no, t.wordings])
+    ));
+  }
+  rows.push([]);
+  rows.push([{v: SIMILAR_DEFECT_NOTE, s: 0, t: 's'}]);
+  return xSheet('類似Defect', rows, sched.length ? 3 : 2, sched.length ? [14, 42, 60] : [14, 60]);
+}
+
+
 function sortTreeNos(nos) {
   return [...nos].sort((a, b) => {
     const na = parseInt(String(a).replace(/\D/g, ''), 10) || 0;
@@ -4020,6 +4221,7 @@ function analyzePhotoPaths(text) {
   const lines = String(text == null ? '' : text).replace(/^\uFEFF/, '').split(/\r\n|\n|\r/);
   const unparsed = [];
   const map = new Map();
+  const byTree = new Map();
   let photoCount = 0;
   let skippedView = 0;
   let noRemark = 0;
@@ -4037,17 +4239,20 @@ function analyzePhotoPaths(text) {
     if (isStandardPhotoViewType(parsed.rest)) { skippedView++; continue; }
     const items = splitRemarks(parsed.rest);
     if (!items.length) { noRemark++; continue; }
+    if (!byTree.has(parsed.treeNo)) byTree.set(parsed.treeNo, []);
     for (const item of items) {
       const m = bestDefect(item);
       if (!map.has(item)) map.set(item, { item, nos: [], photos: 0, type: m.type });
       const row = map.get(item);
       row.nos.push(parsed.treeNo);
       row.photos++;
+      byTree.get(parsed.treeNo).push(item);
     }
   }
   const rows = [...map.values()].map(r => ({ ...r, nos: uniqueTreeNos(r.nos) }))
     .sort((a, b) => compareRemarkWording(a.item, b.item));
-  return { rows, unparsed, photoCount, skippedView, noRemark };
+  const treeItems = [...byTree.entries()].map(([no, items]) => ({ no, items }));
+  return { rows, unparsed, photoCount, skippedView, noRemark, treeItems };
 }
 function photoRemarksTitle(rows) {
   const n = (rows || []).length;
@@ -4086,6 +4291,7 @@ function renderPhotoRemarks() {
   host.innerHTML = photoRemarksHtml(analysis);
   const btn = document.getElementById('btnPhotoExcel');
   if (btn) btn.onclick = () => exportPhotoRemarksExcel(analysis);
+  renderSimilarDefectWarnings(analysis);
 }
 function loadPhotoPathListFile(file) {
   const reader = new FileReader();
@@ -4109,12 +4315,18 @@ function handlePhotoPathDrop(dt) {
 }
 function withPhotoRemarks(rep) {
   const a = analyzePhotoPaths(getPhotoPathsText());
-  return Object.assign({}, rep || {}, { photoRemarkMismatches: a.rows, photoRemarkAnalysis: a });
+  return Object.assign({}, rep || {}, {
+    photoRemarkMismatches: a.rows,
+    photoRemarkAnalysis: a,
+    photoSimilarDefects: collectSimilarDefectsFromPhotoAnalysis(a)
+  });
 }
 function exportPhotoRemarksExcel(analysis) {
   const a = analysis || analyzePhotoPaths(getPhotoPathsText());
   if (!a.rows.length) return;
   const sheets = [photoRemarkSheet(a.rows)];
+  const similar = similarDefectSheet([], collectSimilarDefectsFromPhotoAnalysis(a));
+  if (similar) sheets.push(similar);
   downloadBytes(packXlsx(sheets), '相片Remarks用字.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 
@@ -4989,6 +5201,8 @@ function checkSheets(rep) {
       )
     ], 4, [14, 42, 50, 28]));
   }
+  const similarSheet = similarDefectSheet(rep.similarDefects || [], rep.photoSimilarDefects || []);
+  if (similarSheet) sheets.push(similarSheet);
   const originWarn = (rep.originChecks || []).filter(r => r.reason === 'unclassified');
   if (originWarn.length) {
     sheets.push(xSheet('未分類品種', [
@@ -5923,6 +6137,7 @@ function run(file) {
     }
     const remarkMismatches = collectRemarkMismatches(trees);
     const postureConflicts = collectPostureConflicts(trees);
+    const similarDefects = collectSimilarDefects(trees);
     const nameMismatches = collectNameMismatches(trees);
     const officialChecks = collectOfficialNameChecks(trees);
     const protectedChecks = collectProtectedSpeciesChecks(trees);
@@ -6050,7 +6265,7 @@ Species composition of the survey area is summarized in the following table:`;
     ];
     const formAView = formARows(formA);
     const formBView = formBGroups(formB);
-    const reportData = { mode, project, monthYear, groupIntro, table1Intro, table1Origin, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView, speciesRemarkDead, nameMismatches, writingChecks, officialChecks, protectedChecks, originChecks, remarkMismatches, postureConflicts };
+    const reportData = { mode, project, monthYear, groupIntro, table1Intro, table1Origin, section33Intro, section4Body, section5Intro, section6Intro, species: speciesOrdered, total: active.length, groupBlocks, triageRows, recSummary, recTable1, recDetails, formA, formB, formAView, formBView, speciesRemarkDead, nameMismatches, writingChecks, officialChecks, protectedChecks, originChecks, remarkMismatches, postureConflicts, similarDefects };
     lastReportData = reportData;
     const tgSummaryHtml = groupBlocks.map(g =>
       `<h3>${esc(g.title)}</h3>` + (g.rows.length ? speciesTableHtml(g.rows, g.total) : '<p>No tree was found in this Tree Group.</p>')
