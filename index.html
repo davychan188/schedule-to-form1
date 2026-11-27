@@ -32,7 +32,7 @@
   .photo-paths label { display: block; font-size: 14px; font-weight: bold; color: #1F4E79; margin: 0 0 6px; }
   .photo-paths textarea { width: 100%; min-height: 110px; box-sizing: border-box; font-family: Consolas, "Courier New", monospace; font-size: 12px; padding: 8px; border: 1px solid #1F4E79; border-radius: 8px; resize: vertical; }
   .photo-paths textarea.over { background: #e3eef8; }
-  @media print { #drop, .opts, .note, .noprint, .warn, .photo-paths, #photoPathsBox, #photoRemarksOut, #similarDefectOut { display: none; } }
+  @media print { #drop, .opts, .note, .noprint, .warn, .photo-paths, #photoPathsBox, #photoRemarksOut, #photoSpellingOut, #similarDefectOut { display: none; } }
 </style>
 </head>
 <body>
@@ -53,6 +53,7 @@
   <p class="note">檔案只在瀏覽器處理；只讀路徑／檔名，不會上載相片；不需先上傳 Excel。可貼 Windows 檔案總管「複製為路徑」，或拖放路徑清單 .txt。</p>
 </div>
 <div id="photoRemarksOut"></div>
+<div id="photoSpellingOut"></div>
 <div id="similarDefectOut"></div>
 <div id="out"></div>
 <script>
@@ -4292,6 +4293,7 @@ function renderPhotoRemarks() {
   const btn = document.getElementById('btnPhotoExcel');
   if (btn) btn.onclick = () => exportPhotoRemarksExcel(analysis);
   renderSimilarDefectWarnings(analysis);
+  renderPhotoSpellingWarnings(analysis);
 }
 function loadPhotoPathListFile(file) {
   const reader = new FileReader();
@@ -4318,7 +4320,8 @@ function withPhotoRemarks(rep) {
   return Object.assign({}, rep || {}, {
     photoRemarkMismatches: a.rows,
     photoRemarkAnalysis: a,
-    photoSimilarDefects: collectSimilarDefectsFromPhotoAnalysis(a)
+    photoSimilarDefects: collectSimilarDefectsFromPhotoAnalysis(a),
+    photoRemarkSpellings: collectPhotoRemarkSpellings(a)
   });
 }
 function exportPhotoRemarksExcel(analysis) {
@@ -4327,7 +4330,235 @@ function exportPhotoRemarksExcel(analysis) {
   const sheets = [photoRemarkSheet(a.rows)];
   const similar = similarDefectSheet([], collectSimilarDefectsFromPhotoAnalysis(a));
   if (similar) sheets.push(similar);
+  const spelling = photoSpellingSheet(collectPhotoRemarkSpellings(a));
+  if (spelling) sheets.push(spelling);
   downloadBytes(packXlsx(sheets), '相片Remarks用字.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+
+function editDistance(a, b) {
+  const s1 = String(a || ''), s2 = String(b || '');
+  const m = s1.length, n = s2.length;
+  if (s1 === s2) return 0;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = Array.from({length: m + 1}, (_, i) => {
+    const row = new Array(n + 1);
+    row[0] = i;
+    return row;
+  });
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = s1[i - 1] === s2[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+const PHOTO_SPELL_STOP = new Set([...STOP, 'or']);
+const PHOTO_SPELL_EXTRAS = [
+  'large', 'small', 'slightly', 'severely', 'minor', 'major', 'heavy', 'very',
+  'closeup', 'close', 'up', 'crooked', 'crook', 'cavity', 'cavities',
+  'wholeview', 'trunkbase'
+];
+const PHOTO_SPELL_OK = new Set([
+  'side', 'sides', 'left', 'right', 'front', 'back', 'rear',
+  'upper', 'lower', 'middle', 'inner', 'outer',
+  'north', 'south', 'east', 'west',
+  'northeast', 'northwest', 'southeast', 'southwest',
+  'above', 'below', 'under', 'over', 'around', 'between', 'beside', 'behind',
+  'inside', 'outside', 'along', 'across', 'from', 'into', 'onto', 'upon',
+  'against', 'through', 'after', 'before',
+  'found', 'round', 'would', 'could', 'should',
+  'also', 'both', 'same', 'other', 'another', 'plus', 'including',
+  'nearby', 'next', 'adjacent',
+  'photo', 'photos', 'picture', 'pictures', 'image', 'images',
+  'detail', 'details', 'general', 'overall',
+  'part', 'parts', 'area', 'areas', 'portion', 'portions',
+  'past', 'post', 'line', 'lines', 'like', 'life',
+  'roof', 'wall', 'walls', 'park', 'bank',
+  'grass', 'ground', 'soil', 'three', 'four', 'five'
+]);
+const PHOTO_SPELL_IRREGULAR = {
+  cavity: ['cavities'], cavities: ['cavity'],
+  body: ['bodies'], bodies: ['body'],
+  leaf: ['leaves'], leaves: ['leaf']
+};
+function photoSpellForms(word) {
+  const w = String(word || '').toLowerCase();
+  const out = new Set();
+  if (!w) return out;
+  out.add(w);
+  if (PHOTO_SPELL_IRREGULAR[w]) PHOTO_SPELL_IRREGULAR[w].forEach(x => out.add(x));
+  if (SIMILAR_PLURALS[w]) out.add(SIMILAR_PLURALS[w]);
+  if (w.length > 3 && w.endsWith('s') && !/(ss|us|is)$/.test(w)) out.add(w.slice(0, -1));
+  if (w.endsWith('ies') && w.length > 4) out.add(w.slice(0, -3) + 'y');
+  else if (w.endsWith('y') && w.length > 2 && !/[aeiou]y$/.test(w)) out.add(w.slice(0, -1) + 'ies');
+  else if (/(?:ch|sh|x|z)$/.test(w)) out.add(w + 'es');
+  else if (!w.endsWith('s')) out.add(w + 's');
+  if (w.length > 6 && w.endsWith('ing')) {
+    out.add(w.slice(0, -3));
+    out.add(w.slice(0, -3) + 'e');
+  }
+  if (w.length > 5 && w.endsWith('ed')) {
+    out.add(w.slice(0, -1));
+    out.add(w.slice(0, -2));
+  }
+  return out;
+}
+function buildPhotoSpellLexicon() {
+  const known = new Set();
+  const suggest = new Map();
+  const addKnown = word => {
+    for (const f of photoSpellForms(word)) known.add(f);
+  };
+  const addSuggest = (word, display) => {
+    const k = String(word || '').toLowerCase();
+    if (!/^[a-z]+$/.test(k)) return;
+    if (!suggest.has(k)) suggest.set(k, display || word);
+    addKnown(k);
+  };
+  for (const d of DEFECTS) {
+    const parts = s(d).replace(/[_]+/g, ' ').split(/[^A-Za-z]+/).filter(Boolean);
+    for (const p of parts) addSuggest(p, p);
+  }
+  for (const w of PHOTO_SPELL_EXTRAS) {
+    addSuggest(w, w.charAt(0).toUpperCase() + w.slice(1));
+  }
+  return { known, suggest };
+}
+function buildPhotoSciNames() {
+  const set = new Set();
+  for (const row of SPECIES_LIST || []) {
+    for (const p of String(row[0] || '').split(/[^A-Za-z]+/)) {
+      const k = p.toLowerCase();
+      if (k.length >= 3 && /^[a-z]+$/.test(k) && !/^(var|subsp|sub|sect|and|ex)$/.test(k)) set.add(k);
+    }
+  }
+  return set;
+}
+let PHOTO_SPELL_INDEX = null;
+function photoSpellIndex() {
+  if (!PHOTO_SPELL_INDEX) {
+    const lex = buildPhotoSpellLexicon();
+    PHOTO_SPELL_INDEX = { known: lex.known, suggest: lex.suggest, sci: buildPhotoSciNames() };
+  }
+  return PHOTO_SPELL_INDEX;
+}
+function isExactOfficialRemark(item) {
+  const raw = String(item == null ? '' : item);
+  const k = defectKey(raw);
+  if (DEFECT_EXACT.has(k)) return true;
+  return DEFECT_EXACT.has(defectKey(raw.replace(PHOTO_TRAILING_INDEX_RE, '')));
+}
+function isPhotoSpellKnownWord(word) {
+  const k = String(word || '').toLowerCase();
+  if (!k) return true;
+  if (PHOTO_SPELL_STOP.has(k) || PHOTO_SPELL_OK.has(k)) return true;
+  const idx = photoSpellIndex();
+  if (idx.known.has(k) || idx.sci.has(k)) return true;
+  for (const f of photoSpellForms(k)) {
+    if (idx.known.has(f) || idx.sci.has(f)) return true;
+  }
+  return false;
+}
+function photoSpellMaxDistance(word) {
+  const n = String(word || '').length;
+  if (n < 4) return 0;
+  if (n <= 6) return 1;
+  return 2;
+}
+function suggestPhotoSpellCorrections(word) {
+  const k = String(word || '').toLowerCase();
+  if (!/^[a-z]+$/.test(k) || isPhotoSpellKnownWord(k)) return [];
+  const maxD = photoSpellMaxDistance(k);
+  if (!maxD) return [];
+  const idx = photoSpellIndex();
+  const hits = [];
+  for (const [cand, display] of idx.suggest) {
+    if (cand[0] !== k[0]) continue;
+    if (Math.abs(cand.length - k.length) > maxD) continue;
+    const d = editDistance(k, cand);
+    if (d > 0 && d <= maxD) hits.push({ word: cand, display, distance: d });
+  }
+  if (!hits.length) return [];
+  hits.sort((a, b) => a.distance - b.distance || Math.abs(a.word.length - k.length) - Math.abs(b.word.length - k.length) || a.word.localeCompare(b.word));
+  const minD = hits[0].distance;
+  const best = hits.filter(h => h.distance === minD);
+  return best.slice(0, 3);
+}
+function photoRemarkEnglishWords(item) {
+  return String(item == null ? '' : item).match(/[A-Za-z]+/g) || [];
+}
+function findPhotoRemarkTypos(item) {
+  if (isExactOfficialRemark(item)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const w of photoRemarkEnglishWords(item)) {
+    const key = w.toLowerCase();
+    if (seen.has(key)) continue;
+    const suggestions = suggestPhotoSpellCorrections(w);
+    if (!suggestions.length) continue;
+    seen.add(key);
+    const suggestion = suggestions.map(x => x.display).filter((v, i, arr) => arr.indexOf(v) === i).join(' / ');
+    out.push({ typo: w, suggestion, suggestions });
+  }
+  return out;
+}
+function collectPhotoRemarkSpellings(analysis) {
+  const a = analysis || { rows: [] };
+  const rows = [];
+  for (const row of a.rows || []) {
+    for (const f of findPhotoRemarkTypos(row.item)) {
+      rows.push({
+        item: row.item,
+        typo: f.typo,
+        suggestion: f.suggestion,
+        nos: row.nos ? row.nos.slice() : [],
+        photos: row.photos || 0
+      });
+    }
+  }
+  return rows.sort((a, b) => {
+    const c1 = compareRemarkWording(a.typo, b.typo);
+    if (c1) return c1;
+    const c2 = compareRemarkWording(a.item, b.item);
+    if (c2) return c2;
+    return compareRemarkWording(a.suggestion, b.suggestion);
+  });
+}
+function photoSpellingTitle(rows) {
+  return '請核對：' + (rows || []).length + ' 項相片 Remarks 英文串字';
+}
+const PHOTO_SPELL_NOTE = '相片檔名 Remarks 可能有英文串錯字；報告用字、統計及檔名不會自動更改。';
+function photoSpellingWarnHtml(rows) {
+  if (!rows || !rows.length) return '';
+  return `<div class="warn noprint" id="photoSpellingBox">
+      <h3>${esc(photoSpellingTitle(rows))}</h3>
+      <table><tr><th>Remarks 用字</th><th>疑似錯字</th><th>建議寫法</th><th>棵數</th><th>張數</th><th>Tree No.</th></tr>
+      ${rows.map(r => `<tr><td>${esc(r.item)}</td><td>${esc(r.typo)}</td><td>${esc(r.suggestion)}</td><td>${r.nos.length}</td><td>${r.photos}</td><td>${ids(r.nos)}</td></tr>`).join('')}
+      </table>
+      <p>${PHOTO_SPELL_NOTE}</p>
+    </div>`;
+}
+function renderPhotoSpellingWarnings(analysis) {
+  const host = document.getElementById('photoSpellingOut');
+  if (!host) return;
+  const rows = collectPhotoRemarkSpellings(analysis || analyzePhotoPaths(getPhotoPathsText()));
+  host.innerHTML = photoSpellingWarnHtml(rows);
+}
+function photoSpellingSheet(rows) {
+  if (!rows || !rows.length) return null;
+  return xSheet('相片Remarks串字', [
+    [{v: photoSpellingTitle(rows), s: 2, t: 's'}],
+    [],
+    ...xSimpleTable(
+      ['Remarks 用字', '疑似錯字', '建議寫法', '棵數', '張數', 'Tree No.'],
+      rows.map(r => [r.item, r.typo, r.suggestion, r.nos.length, r.photos, joinNos(r.nos)])
+    ),
+    [],
+    [{v: PHOTO_SPELL_NOTE, s: 0, t: 's'}]
+  ], 6, [50, 14, 20, 8, 8, 60]);
 }
 
 function normSciName(sci) {
@@ -5238,6 +5469,10 @@ function checkSheets(rep) {
   const photoRemarks = rep.photoRemarkMismatches || [];
   if (photoRemarks.length) {
     sheets.push(photoRemarkSheet(photoRemarks));
+  }
+  const photoSpell = rep.photoRemarkSpellings || [];
+  if (photoSpell.length) {
+    sheets.push(photoSpellingSheet(photoSpell));
   }
   return sheets;
 }
