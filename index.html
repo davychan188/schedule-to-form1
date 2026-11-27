@@ -5042,7 +5042,7 @@ function formBGroups(list) {
     const lab = overallCondition(t) || '-';
     map[k].conds[lab] = (map[k].conds[lab] || 0) + 1;
   });
-  return Object.values(map).sort((a, b) => a.species.toLowerCase().localeCompare(b.species.toLowerCase())).map(g => {
+  const rows = Object.values(map).map(g => {
     const entries = Object.entries(g.conds);
     entries.sort((a, b) => b[1] - a[1] || conditionRank(a[0]) - conditionRank(b[0]));
     return {
@@ -5052,9 +5052,15 @@ function formBGroups(list) {
       n: g.n,
       from: g.hts.length ? numOut(Math.min(...g.hts)) : '',
       to: g.hts.length ? numOut(Math.max(...g.hts)) : '',
-      condition: entries.length ? entries[0][0] : '-'
+      condition: entries.length ? entries[0][0] : '-',
+      nonSpecies: isDeadSpecies(g.sci, g.chi)
     };
   });
+  const live = rows.filter(g => !g.nonSpecies)
+    .sort((a, b) => a.species.toLowerCase().localeCompare(b.species.toLowerCase()));
+  const dead = rows.filter(g => g.nonSpecies)
+    .sort((a, b) => a.species.toLowerCase().localeCompare(b.species.toLowerCase()));
+  return [...live, ...dead];
 }
 function conditionEnglish(rawOrLabel) {
   const lab = conditionLabel(rawOrLabel) || s(rawOrLabel);
@@ -5526,6 +5532,31 @@ function qtyLabel(x) {
   if (x.removed) return x.n + ' (' + x.removed + ' Removed)';
   return String(x.n);
 }
+function isNonSpeciesRow(x) {
+  return !!(x && (x.nonSpecies || isDeadSpecies(x.sci, x.chi)));
+}
+function countIdentifiedSpecies(list) {
+  const seen = new Set();
+  for (const t of list || []) {
+    if (isDeadSpecies(t.sci, t.chi)) continue;
+    seen.add(s(t.sci) + '|' + s(t.chi));
+  }
+  return seen.size;
+}
+function applyDeadLabel(sci, chi, deadAs) {
+  if (isDeadSpecies(sci, chi) || (!s(sci) && !s(chi))) {
+    if (deadAs === 'Unidentified') return { sci: 'Unidentified', chi: 'Unidentified' };
+    return { sci: 'Dead tree', chi: '死樹' };
+  }
+  return { sci: s(sci), chi: s(chi) };
+}
+function section33IntroText(speciesN, deadN) {
+  return `A total of ${speciesN} species were recorded during the survey and are represented throughout the survey area. No rare tree species, Registered Old and Valuable Trees (OVT), and Stonewall Trees were found during the inspection.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}
+Species composition of the survey area is summarized in the following table:`;
+}
+function section5IntroText(total, speciesN, domSci, domRest, deadN) {
+  return `A total of ${total} trees and ${speciesN} species were recorded. The dominant species is ${domSci}${domRest ? ' ' + domRest : ''}.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}`;
+}
 function speciesBreakdown(list) {
   const map = {};
   for (const t of list) {
@@ -5538,7 +5569,9 @@ function speciesBreakdown(list) {
   const rows = Object.values(map);
   const live = rows.filter(x => !isDeadSpecies(x.sci, x.chi))
     .sort((a, b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()));
-  const dead = rows.filter(x => isDeadSpecies(x.sci, x.chi));
+  const dead = rows.filter(x => isDeadSpecies(x.sci, x.chi))
+    .sort((a, b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()) || a.chi.localeCompare(b.chi, 'zh'))
+    .map(x => Object.assign({}, x, { nonSpecies: true }));
   return [...live, ...dead];
 }
 function isItalicSci(sci, chi) {
@@ -5548,10 +5581,18 @@ function sciHtml(sci, chi) {
   const t = esc(sci);
   return isItalicSci(sci, chi) ? `<i>${t}</i>` : t;
 }
+function sciSpan(sci, chi) {
+  const t = esc(sci);
+  return isItalicSci(sci, chi) ? `<span class="sci">${t}</span>` : t;
+}
+function mapSpeciesTableRows(rows, fn) {
+  let n = 0;
+  return (rows || []).map(x => fn(x, isNonSpeciesRow(x) ? '' : ++n));
+}
 function speciesTableHtml(rows, total) {
   return `<table>
       <tr><th></th><th>Scientific Name</th><th>Chinese Name</th><th>Quantity</th></tr>
-      ${rows.map((x, i) => `<tr><td>${i + 1}</td><td>${sciHtml(x.sci, x.chi)}</td><td>${esc(x.chi)}</td><td>${esc(qtyLabel(x))}</td></tr>`).join('')}
+      ${mapSpeciesTableRows(rows, (x, num) => `<tr><td>${num}</td><td>${sciHtml(x.sci, x.chi)}</td><td>${esc(x.chi)}</td><td>${esc(qtyLabel(x))}</td></tr>`).join('')}
       <tr><td>Total</td><td></td><td></td><td>${total}</td></tr></table>`;
 }
 function xmlEsc(v) {
@@ -5664,8 +5705,8 @@ function wTable(rows, total) {
   const cell = (i, inner) => wCell(wP(inner), widths[i]);
   const header = ['', 'Scientific Name', 'Chinese Name', 'Quantity'];
   const headerRow = `<w:tr>${header.map((h, i) => cell(i, wRun(h, {b:true}))).join('')}</w:tr>`;
-  const body = rows.map((x, i) => `<w:tr>${
-    cell(0, wRun(String(i + 1))) +
+  const body = mapSpeciesTableRows(rows, (x, num) => `<w:tr>${
+    cell(0, wRun(num === '' ? '' : String(num))) +
     cell(1, wRun(x.sci, {i: isItalicSci(x.sci, x.chi)})) +
     cell(2, wRun(x.chi)) +
     cell(3, wRun(qtyLabel(x)))
@@ -5815,9 +5856,9 @@ function xTableRows(startTitle, rows, total) {
     {v: 'Chinese Name', s: 3, t: 's'},
     {v: 'Quantity', s: 3, t: 's'}
   ]);
-  rows.forEach((x, i) => {
+  mapSpeciesTableRows(rows, (x, num) => {
     out.push([
-      {v: i + 1, s: 4, t: 'n'},
+      num === '' ? {v: '', s: 4, t: 's'} : {v: num, s: 4, t: 'n'},
       {v: x.sci, s: isItalicSci(x.sci, x.chi) ? 5 : 4, t: 's'},
       {v: x.chi, s: 4, t: 's'},
       {v: x.removed ? qtyLabel(x) : x.n, s: 4, t: x.removed ? 's' : 'n'}
@@ -6126,10 +6167,9 @@ function run(file) {
       if (remarkIsDeadTree(remarks) && !isDeadSpecies(sci, chi)) {
         speciesRemarkDead.push({ no, sci, chi, remarks });
       }
-      if (isDeadSpecies(sci, chi) || (!sci && !chi)) {
-        if (deadAs === 'Unidentified') { sci = 'Unidentified'; chi = 'Unidentified'; }
-        else { sci = 'Dead tree'; chi = '死樹'; }
-      }
+      const labeled = applyDeadLabel(sci, chi, deadAs);
+      sci = labeled.sci;
+      chi = labeled.chi;
       trees.push({ no, sci, chi, dbh: s(r[c.dbh]), ht: s(r[c.ht]), spread: s(r[c.sp]),
         health: s(r[c.health]), struct: s(r[c.struct]), triage: s(r[c.triage]),
         remarks, rec, zone: s(r[c.zone]), source: s(r[c.source]),
@@ -6151,8 +6191,6 @@ function run(file) {
       species[k].n++;
       if (isRemoved(t.remarks)) species[k].removed++;
     });
-    const spRows = Object.entries(species).map(([k,v]) => { const [sci,chi]=k.split('|'); return {sci,chi,n:v.n,removed:v.removed}; })
-      .sort((a,b) => a.sci.toLowerCase().localeCompare(b.sci.toLowerCase()));
     const liveSpRows = Object.entries(species).filter(([k]) => { const [sci,chi]=k.split('|'); return !isDeadSpecies(sci, chi); });
     const dom = (liveSpRows.length ? liveSpRows : Object.entries(species)).sort((a,b)=>b[1].n-a[1].n)[0];
     const domSci = dom ? dom[0].split('|')[0] : 'N.A.';
@@ -6202,7 +6240,7 @@ function run(file) {
     const removedN = active.filter(t => isRemoved(t.remarks)).length;
     const deadN = active.filter(t => isDeadSpecies(t.sci, t.chi) && !isRemoved(t.remarks)).length;
     const aliveN = active.length - deadN - removedN;
-    const speciesLive = spRows.filter(x => !isDeadSpecies(x.sci, x.chi));
+    const speciesLiveN = countIdentifiedSpecies(active);
     const speciesOrdered = speciesBreakdown(active);
     const joinAnd = arr => arr.length > 1 ? arr.slice(0,-1).join(', ') + ', and ' + arr[arr.length-1] : (arr[0] || 'the site');
     const table1Origin = collectNewfoundOrigin(active);
@@ -6213,8 +6251,7 @@ function run(file) {
       : '';
     const project = s(document.getElementById('project').value) || detectProject(raw, hr);
     const projectPhrase = project ? ' at ' + project : '';
-    const section33Intro = `A total of ${speciesLive.length} species were recorded during the survey and are represented throughout the survey area. No rare tree species, Registered Old and Valuable Trees (OVT), and Stonewall Trees were found during the inspection.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}
-Species composition of the survey area is summarized in the following table:`;
+    const section33Intro = section33IntroText(speciesLiveN, deadN);
     const section4Body = buildSection4Body({
       projectPhrase, total: active.length, indN, grpN, newN, aliveN, deadN, removedN, protectedChecks
     });
@@ -6232,7 +6269,7 @@ Species composition of the survey area is summarized in the following table:`;
     const otherPhrase = !otherGroups.length ? ''
       : otherGroups.length === 1 ? `, and ${otherGroups[0].n} for ${otherGroups[0].label}`
       : `, and ${others.length} for other mitigation measures (${otherGroups.map(g => g.label).join('; ')})`;
-    const section5Intro = `A total of ${active.length} trees and ${speciesLive.length} species were recorded. The dominant species is ${domSci}${domRest ? ' ' + domRest : ''}.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}`;
+    const section5Intro = section5IntroText(active.length, speciesLiveN, domSci, domRest, deadN);
     const section6Intro = `A total of ${prune.length} trees were recommended for pruning, ${removal.length} number were recommended for tree removal, ${monitor.length} for keep monitoring, ${pest.length} for pest control${otherPhrase}. (See Table 1). The proposed mitigations for specific trees are summarised in the table (See Table 2). For details, please refer to Section 7 – Appendix D (Tree inventory).`;
     const triageRows = [
       {colour: 'Black', n: blk.length, nos: joinNos(blk)},
@@ -6366,9 +6403,9 @@ Species composition of the survey area is summarized in the following table:`;
       </p>
       <div id="report">
       <h2>Section 5<br>Tree Survey Findings</h2>
-      <p>A total of ${active.length} trees and ${speciesLive.length} species were recorded. The dominant species is <span class="sci">${esc(domSci)}</span> ${esc(domRest)}.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}</p>
+      <p>A total of ${active.length} trees and ${speciesLiveN} species were recorded. The dominant species is ${isItalicSci(domSci, '') ? '<span class="sci">' + esc(domSci) + '</span>' : esc(domSci)} ${esc(domRest)}.${deadN ? ' ' + deadN + ' dead trees with unknown species were observed in the survey area.' : ''}</p>
       <table><tr><th>Tree Species</th><th>Quantity</th></tr>
-      ${spRows.map(x => `<tr><td><span class="sci">${esc(x.sci)}</span> ${esc(x.chi)}</td><td>${esc(qtyLabel(x))}</td></tr>`).join('')}
+      ${speciesOrdered.map(x => `<tr><td>${sciSpan(x.sci, x.chi)} ${esc(x.chi)}</td><td>${esc(qtyLabel(x))}</td></tr>`).join('')}
       <tr><td>Total number of trees</td><td>${active.length}</td></tr></table>
       <p>TRIAGE colour summary</p>
       <table><tr><th>Colour</th><th>No. of trees</th><th>Tree No.</th></tr>
@@ -6402,12 +6439,12 @@ Species composition of the survey area is summarized in the following table:`;
       ${otherGroups.map(g => `<p>${esc(g.label)}:<br>${ids(g.trees)}</p>`).join('')}
       <h2>Form 1 - Table (A) Triage Trees & Trees Require Remedial Actions (${formA.length})</h2>
       <table><tr><th>Dept. Tree ID</th><th>Zone</th><th>Tree Species (Scientific + Chinese)</th><th>DBH (mm)</th><th>Est. Height (m)</th><th>Est. Crown Spread (m)</th><th>Tree Status</th><th>Overall Tree Conditions</th><th>Triage Colour</th><th>Remedial Action</th><th>Anticipated Completion Date</th></tr>
-      ${formAView.map(t => `<tr><td>${esc(t.no)}</td><td>${esc(t.zone)}</td><td><span class="sci">${esc(t.sci)}</span>${esc(t.chi)}</td><td>${esc(t.dbh)}</td><td>${esc(t.ht)}</td><td>${esc(t.spread)}</td><td>${esc(t.status)}</td><td>${esc(t.condition)}</td><td>${esc(t.triage)}</td><td>${esc(t.rec)}</td><td>${esc(t.date)}</td></tr>`).join('')}
+      ${formAView.map(t => `<tr><td>${esc(t.no)}</td><td>${esc(t.zone)}</td><td>${sciSpan(t.sci, t.chi)}${esc(t.chi)}</td><td>${esc(t.dbh)}</td><td>${esc(t.ht)}</td><td>${esc(t.spread)}</td><td>${esc(t.status)}</td><td>${esc(t.condition)}</td><td>${esc(t.triage)}</td><td>${esc(t.rec)}</td><td>${esc(t.date)}</td></tr>`).join('')}
       <tr><td colspan="11">Sub-total No. of Trees in Table (A): ${formA.length}</td></tr>
       </table>
       <h2>Form 1 - Table (B) Other Trees (${formB.length})</h2>
       <table><tr><th>Tree Species 樹種</th><th>App. Quantity of Trees</th><th>Height From (m)</th><th>To (m)</th><th>Overall Conditions</th></tr>
-      ${formBView.map(g => `<tr><td><span class="sci">${esc(g.sci)}</span>${esc(g.chi)}</td><td>${g.n}</td><td>${g.from}</td><td>${g.to}</td><td>${esc(g.condition)}</td></tr>`).join('')}
+      ${formBView.map(g => `<tr><td>${sciSpan(g.sci, g.chi)}${esc(g.chi)}</td><td>${g.n}</td><td>${g.from}</td><td>${g.to}</td><td>${esc(g.condition)}</td></tr>`).join('')}
       <tr><td colspan="5">Sub-total No. of Trees in Table (B): ${formB.length}</td></tr>
       </table>
       <p class="note">品種摘要見 Section 5。有效總數 ${active.length}（已排除 Removed）。TPRP ${tprpN}／新發現 ${newN}。工作表：${esc(usedSheet)}</p>
